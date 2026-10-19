@@ -162,6 +162,17 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
   Stelle, abgelaufen, Adresse passt nicht, ungültig (verändert) oder nur teilweise signiert. MD5 und RSA unter
   2048 Bit werden abgelehnt, SHA-1 als „schwach“ gekennzeichnet. Der Zeitpunkt stammt aus der Signatur (`signingTime`)
   und ist nicht später als jetzt; ist das Zertifikat inzwischen abgelaufen, steht ein Hinweis dabei.
+- **Verschlüsselt senden** (RFC 8551): Jeder Empfänger in An, Cc und Bcc braucht ein jetzt gültiges Zertifikat mit
+  passender Adresse, Zweck „Verschlüsseln“, ausreichend starkem Schlüssel (RSA ab 2048 Bit oder EC) und
+  vertrauenswürdiger Kette. Fehlt eines, wird **nicht** gesendet und der Empfänger genannt – das prüft die Oberfläche
+  vorab und das Backend beim Senden noch einmal. Text und Anhänge werden gemeinsam als EnvelopedData mit AES-256-CBC
+  verschlüsselt (breite Verträglichkeit), immer auch an das eigene Zertifikat, damit „Gesendet“ lesbar bleibt.
+  Signiert wird vorher, innerhalb der Verschlüsselung (SHA-256), damit Empfänger Veränderungen erkennen.
+- **Bcc** wie bei OpenPGP: Jeder Bcc-Empfänger bekommt eine eigene Nachricht, nur an sein Zertifikat verschlüsselt;
+  die Nachricht für An/Cc nennt keine Bcc-Empfänger, auch nicht in den Empfängerangaben der Verschlüsselung.
+- **Nur signiert**: `multipart/signed` mit abgetrennter Signatur (`application/pkcs7-signature`, SHA-256), mit eigenem
+  Zertifikat und Zwischenzertifikaten. Die Passphrase wird beim Senden abgefragt und nur bis Programmende im
+  Arbeitsspeicher gehalten. Entwürfe verschlüsselter Mails bleiben nur auf dem Gerät.
 
 ### Tauri und Oberfläche
 
@@ -226,8 +237,7 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
   verschlüsselt. **Metadaten** wie Betreff, Absender, Empfänger und Datum stehen weiterhin im Klartext im Kopf der Mail.
   Unverschlüsselte Mails liegen auf dem Server so, wie der Server sie speichert.
 - **S/MIME ohne Sperrprüfung**: CRL und OCSP werden bewusst nicht abgefragt (keine Verbindungen zu fremden Diensten);
-  gesperrte Zertifikate erkennt SicherMail nicht. Verschlüsselt und signiert senden mit S/MIME folgt in
-  [#56](https://github.com/Louidos/Mail/issues/56) (Teil 2).
+  gesperrte Zertifikate erkennt SicherMail nicht, weder beim Lesen noch beim Verschlüsseln an andere.
 - **OpenPGP-Schlüsselverwaltung ohne Vertrauensnetz**: Ablauf und Widerruf von Schlüsseln werden nicht ausgewertet,
   Beglaubigungen (Web of Trust) nicht geprüft. Ob ein Schlüssel wirklich der Person gehört, muss der Nutzer über den
   Fingerabdruck selbst prüfen.

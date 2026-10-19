@@ -3,6 +3,7 @@
 //! - `zertifikat`: Zertifikate einlesen, prüfen, beschreiben; private Schlüssel schützen
 //! - `speicher`: Tabellen in `schluessel.db` (gemeinsam mit OpenPGP)
 //! - `lesen`: verschlüsselte und signierte Mails erkennen, entschlüsseln und prüfen
+//! - `schreiben`: Mails verschlüsseln und signieren
 //! - `der`: kleiner DER-Leser für Angaben, die OpenSSL nicht herausgibt
 //!
 //! Vertraut wird dem Zertifikatsspeicher des Betriebssystems und Wurzeln, die der Nutzer
@@ -12,21 +13,23 @@
 
 pub mod der;
 pub mod lesen;
+pub mod schreiben;
 pub mod speicher;
 pub mod zertifikat;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use openssl::x509::X509;
+use openssl::x509::{X509PurposeId, X509};
 use serde::Serialize;
 use zeroize::Zeroizing;
 
 use crate::fehler::Fehlermeldung;
 use crate::pgp::lesen::{Signatur, Verarbeitet};
 use crate::pgp::speicher::{SchluesselDb, SchluesselSpeicher};
+use crate::pgp::VersandPruefung;
 use speicher::{Art, EigenerEintrag, SmimeSpeicher};
-use zertifikat::{fehler, ZertifikatInfo};
+use zertifikat::{fehler, ZertifikatInfo, Zweck};
 
 /// Ein eigenes Zertifikat in der Übersicht.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -340,5 +343,166 @@ impl SmimeDienst {
                 ergebnis
             }
         }
+    }
+
+    /// Eigenes Zertifikat des Kontos, das jetzt gültig ist und für alle `zwecke` taugt (das
+    /// neueste).
+    fn eigenes_fuer(
+        &self,
+        konto: &str,
+        zwecke: &[Zweck],
+    ) -> Result<Option<(EigenerEintrag, X509)>, Fehlermeldung> {
+        let jetzt = zertifikat::jetzt();
+        Ok(self
+            .eigene()?
+            .into_iter()
+            .filter(|(e, z)| {
+                let (ab, bis) = zertifikat::gueltigkeit(z);
+                e.konto == konto
+                    && ab <= jetzt
+                    && jetzt <= bis
+                    && zwecke
+                        .iter()
+                        .all(|zweck| zertifikat::zweck_passt(z, *zweck))
+            })
+            .max_by_key(|(_, z)| zertifikat::gueltigkeit(z).0))
+    }
+
+    /// Zertifikat, an das für `adresse` verschlüsselt werden darf: jetzt gültig, passende
+    /// Adresse, Zweck „Verschlüsseln“, starker Schlüssel und vertrauenswürdige Kette (das neueste).
+    fn zum_verschluesseln<'a>(ring: &'a lesen::Ring, adresse: &str) -> Option<&'a X509> {
+        let jetzt = zertifikat::jetzt();
+        ring.bekannte
+            .iter()
+            .filter(|z| {
+                !zertifikat::ist_stelle(z)
+                    && zertifikat::passt_zu_adresse(z, adresse)
+                    && zertifikat::zweck_passt(z, Zweck::Verschluesseln)
+                    && zertifikat::schluessel_stark_genug(z)
+                    && schreiben::verfahren_unterstuetzt(z)
+                    && lesen::kette_pruefen(
+                        z,
+                        ring.bekannte.clone(),
+                        &ring.wurzeln,
+                        jetzt,
+                        X509PurposeId::SMIME_ENCRYPT,
+                    ) == lesen::Kette::Gueltig
+            })
+            .max_by_key(|z| zertifikat::gueltigkeit(z).0)
+    }
+
+    /// Prüft, ob mit S/MIME gesendet werden kann (ohne etwas zu verändern).
+    pub fn versand_pruefen(
+        &self,
+        konto: &str,
+        adressen: &[String],
+        verschluesseln: bool,
+        signieren: bool,
+    ) -> Result<VersandPruefung, Fehlermeldung> {
+        let mut pruefung = VersandPruefung::default();
+        if !verschluesseln && !signieren {
+            return Ok(pruefung);
+        }
+        let zwecke = Self::zwecke(verschluesseln, signieren);
+        match self.eigenes_fuer(konto, &zwecke)? {
+            None => pruefung.eigener_fehlt = true,
+            Some((eintrag, _)) => {
+                if signieren && self.passphrase(&eintrag.fingerabdruck).is_none() {
+                    pruefung.passphrase_fuer =
+                        Some(zertifikat::fingerabdruck_anzeige(&eintrag.fingerabdruck));
+                }
+            }
+        }
+        if verschluesseln {
+            let ring = self.ring()?;
+            for adresse in adressen {
+                let adresse = adresse.trim().to_lowercase();
+                if Self::zum_verschluesseln(&ring, &adresse).is_none()
+                    && !pruefung.fehlende_empfaenger.contains(&adresse)
+                {
+                    pruefung.fehlende_empfaenger.push(adresse);
+                }
+            }
+        }
+        Ok(pruefung)
+    }
+
+    fn zwecke(verschluesseln: bool, signieren: bool) -> Vec<Zweck> {
+        let mut zwecke = Vec::new();
+        if verschluesseln {
+            zwecke.push(Zweck::Verschluesseln);
+        }
+        if signieren {
+            zwecke.push(Zweck::Signieren);
+        }
+        zwecke
+    }
+
+    /// Stellt die Zertifikate für den Versand zusammen. Fehlt etwas, wird nicht gesendet:
+    /// SicherMail sendet nie unbemerkt unverschlüsselt.
+    pub fn versand_vorbereiten(
+        &self,
+        konto: &str,
+        adressen: &[String],
+        verschluesseln: bool,
+        signieren: bool,
+    ) -> Result<schreiben::Versand, Fehlermeldung> {
+        let pruefung = self.versand_pruefen(konto, adressen, verschluesseln, signieren)?;
+        if pruefung.eigener_fehlt {
+            return Err(Fehlermeldung::neu(
+                "smime_kein_eigenes",
+                "Für dieses Konto gibt es kein gültiges eigenes S/MIME-Zertifikat. Importiere es unter „Schlüssel und Zertifikate“.",
+            ));
+        }
+        if !pruefung.fehlende_empfaenger.is_empty() {
+            return Err(Fehlermeldung::neu(
+                "smime_zertifikat_fehlt",
+                format!(
+                    "Für diese Empfänger fehlt ein gültiges S/MIME-Zertifikat: {}. SicherMail sendet nie unbemerkt unverschlüsselt – importiere die Zertifikate oder schalte „Verschlüsseln“ aus.",
+                    pruefung.fehlende_empfaenger.join(", ")
+                ),
+            ));
+        }
+        if pruefung.passphrase_fuer.is_some() {
+            return Err(Fehlermeldung::neu(
+                "smime_passphrase",
+                "Zum Signieren wird die Passphrase deines S/MIME-Zertifikats benötigt.",
+            ));
+        }
+        let (eintrag, eigenes) = self
+            .eigenes_fuer(konto, &Self::zwecke(verschluesseln, signieren))?
+            .ok_or_else(|| fehler("Kein eigenes Zertifikat."))?;
+        let empfaenger = if verschluesseln {
+            let ring = self.ring()?;
+            let mut zuordnung = std::collections::HashMap::new();
+            for adresse in adressen {
+                let adresse = adresse.trim().to_lowercase();
+                let z = Self::zum_verschluesseln(&ring, &adresse)
+                    .ok_or_else(|| fehler("Ein Empfängerzertifikat fehlt."))?;
+                zuordnung.insert(adresse, z.clone());
+            }
+            Some(zuordnung)
+        } else {
+            None
+        };
+        let signierer = if signieren {
+            let passphrase = self
+                .passphrase(&eintrag.fingerabdruck)
+                .ok_or_else(|| fehler("Die Passphrase fehlt."))?;
+            let schluessel = zertifikat::schluessel_oeffnen(&eintrag.geheim, &passphrase)
+                .ok_or_else(|| fehler("Die Passphrase ist falsch."))?;
+            Some(schreiben::Signierer {
+                zertifikat: eigenes.clone(),
+                schluessel,
+                kette: zertifikat::kette_lesen(&eintrag.kette),
+            })
+        } else {
+            None
+        };
+        Ok(schreiben::Versand {
+            empfaenger,
+            eigenes,
+            signierer,
+        })
     }
 }

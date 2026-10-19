@@ -1,5 +1,13 @@
 /** Fenster „Mail verfassen“: neue Mail, Antwort, Weiterleitung oder geöffneter Entwurf. */
-import { api, fehlertext, type Entwurf, type Konto, type SendeErgebnis, type VersandPruefung } from "../api";
+import {
+  api,
+  fehlertext,
+  type Entwurf,
+  type Konto,
+  type SendeErgebnis,
+  type Verfahren,
+  type VersandPruefung,
+} from "../api";
 import { bestaetigen, modalSchliessen, modalZeigen, passphraseAbfragen } from "../dialoge";
 import { el } from "../dom";
 import { groesse } from "../postfach/format";
@@ -14,18 +22,64 @@ export interface VerfassenOptionen {
   entwuerfeGeaendert?: () => void;
 }
 
+/** Anzeigenamen der Verfahren. */
+export const VERFAHREN_NAME: Record<Verfahren, string> = { openpgp: "OpenPGP", smime: "S/MIME" };
+
 /**
- * Meldung, warum mit OpenPGP (noch) nicht gesendet werden kann, oder `null`. Die Passphrase
- * ist kein Hindernis: Nach ihr wird beim Senden gefragt.
+ * Meldung, warum mit OpenPGP bzw. S/MIME (noch) nicht gesendet werden kann, oder `null`. Die
+ * Passphrase ist kein Hindernis: Nach ihr wird beim Senden gefragt.
  */
-export function versandHindernis(pruefung: VersandPruefung, verschluesseln: boolean): string | null {
+export function versandHindernis(
+  pruefung: VersandPruefung,
+  verschluesseln: boolean,
+  verfahren: Verfahren = "openpgp",
+): string | null {
+  const smime = verfahren === "smime";
   if (pruefung.eigener_fehlt) {
-    return "Für dieses Konto gibt es noch keinen eigenen Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel und Zertifikate“.";
+    return smime
+      ? "Für dieses Konto gibt es kein gültiges eigenes S/MIME-Zertifikat. Importiere es unter „Schlüssel und Zertifikate“."
+      : "Für dieses Konto gibt es noch keinen eigenen Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel und Zertifikate“.";
   }
   if (verschluesseln && pruefung.fehlende_empfaenger.length > 0) {
-    return `Für diese Empfänger fehlt ein öffentlicher Schlüssel: ${pruefung.fehlende_empfaenger.join(", ")}. Ohne Schlüssel wird nicht gesendet – importiere ihn oder schalte „Verschlüsseln“ aus.`;
+    const liste = pruefung.fehlende_empfaenger.join(", ");
+    return smime
+      ? `Für diese Empfänger fehlt ein gültiges S/MIME-Zertifikat: ${liste}. Ohne Zertifikat wird nicht gesendet – importiere es oder schalte „Verschlüsseln“ aus.`
+      : `Für diese Empfänger fehlt ein öffentlicher Schlüssel: ${liste}. Ohne Schlüssel wird nicht gesendet – importiere ihn oder schalte „Verschlüsseln“ aus.`;
   }
   return null;
+}
+
+/** Welche Verfahren hat ein Konto (eigener OpenPGP-Schlüssel, gültiges eigenes S/MIME-Zertifikat)? */
+export interface EigeneVerfahren {
+  openpgp: boolean;
+  smime: boolean;
+}
+
+/**
+ * Voreinstellung: das Verfahren des Entwurfs (z. B. bei Antworten), sofern vorhanden; sonst
+ * OpenPGP, wenn ein eigener PGP-Schlüssel da ist, sonst S/MIME.
+ */
+export function verfahrenWaehlen(vorhanden: EigeneVerfahren, wunsch?: Verfahren): Verfahren {
+  if (wunsch && vorhanden[wunsch]) return wunsch;
+  if (vorhanden.openpgp) return "openpgp";
+  if (vorhanden.smime) return "smime";
+  return wunsch ?? "openpgp";
+}
+
+/** Lädt, welches Konto welche Verfahren hat (Fehler zählen als „keines“). */
+async function verfahrenLaden(): Promise<(konto: string) => EigeneVerfahren> {
+  const sicher = async <T>(laden: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await laden();
+    } catch {
+      return undefined;
+    }
+  };
+  const [pgp, smime] = await Promise.all([sicher(api.pgpUebersicht), sicher(api.smimeUebersicht)]);
+  return (konto) => ({
+    openpgp: (pgp?.eigene ?? []).some((e) => e.konto === konto),
+    smime: (smime?.eigene ?? []).some((e) => e.konto === konto && !e.abgelaufen),
+  });
 }
 
 function feld(beschriftung: string, eingabe: HTMLElement): HTMLLabelElement {
@@ -52,6 +106,17 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
   const html = el("input", { type: "checkbox", name: "html", checked: entwurf.html });
   const verschluesseln = el("input", { type: "checkbox", name: "verschluesseln", checked: !!entwurf.verschluesseln });
   const signieren = el("input", { type: "checkbox", name: "signieren", checked: !!entwurf.signieren });
+  // Verfahren: Auswahl nur sichtbar, wenn das Konto OpenPGP und S/MIME eingerichtet hat.
+  let verfahren: Verfahren = entwurf.verfahren ?? "openpgp";
+  const verfahrenWahl = el(
+    "select",
+    { name: "verfahren", "aria-label": "Verfahren" },
+    el("option", { value: "openpgp" }, VERFAHREN_NAME.openpgp),
+    el("option", { value: "smime" }, VERFAHREN_NAME.smime),
+  );
+  const verfahrenFeld = el("label", { class: "umschalter", hidden: true }, "Verfahren:", verfahrenWahl);
+  const verschluesselnText = el("span", {});
+  const signierenText = el("span", {});
   const pgpHinweis = el("p", { class: "pgp-hinweis", role: "status", "aria-live": "polite" });
   const anhangListe = el("ul", { class: "anhaenge" });
   const status = el("p", { class: "status", role: "status", "aria-live": "polite" });
@@ -74,8 +139,9 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
     el(
       "div",
       { class: "pgp-schalter" },
-      el("label", { class: "umschalter" }, verschluesseln, "Verschlüsseln (OpenPGP)"),
-      el("label", { class: "umschalter" }, signieren, "Signieren (OpenPGP)"),
+      verfahrenFeld,
+      el("label", { class: "umschalter" }, verschluesseln, verschluesselnText),
+      el("label", { class: "umschalter" }, signieren, signierenText),
     ),
     pgpHinweis,
     el("div", { class: "anhang-bereich" }, el("h3", {}, "Anhänge"), anhangListe, anhaengen),
@@ -102,11 +168,33 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
     entwurf.html = html.checked;
     entwurf.verschluesseln = verschluesseln.checked;
     entwurf.signieren = signieren.checked;
+    entwurf.verfahren = verfahren;
     return entwurf;
   };
 
-  /** Prüft Schlüssel und zeigt, was fehlt. Gibt die Prüfung zurück (oder `null` ohne OpenPGP). */
+  const verfahrenZeigen = () => {
+    verfahrenWahl.value = verfahren;
+    verschluesselnText.textContent = `Verschlüsseln (${VERFAHREN_NAME[verfahren]})`;
+    signierenText.textContent = `Signieren (${VERFAHREN_NAME[verfahren]})`;
+  };
+  verfahrenZeigen();
+  let vorhandenFuer: ((konto: string) => EigeneVerfahren) | null = null;
+  /** Verfahren für das gewählte Konto festlegen; Auswahl nur, wenn beide eingerichtet sind. */
+  const verfahrenAnpassen = (wunsch?: Verfahren) => {
+    if (!vorhandenFuer) return;
+    const vorhanden = vorhandenFuer(von.value);
+    verfahren = verfahrenWaehlen(vorhanden, wunsch);
+    verfahrenFeld.hidden = !(vorhanden.openpgp && vorhanden.smime);
+    verfahrenZeigen();
+  };
+  const verfahrenBereit = verfahrenLaden().then((fuer) => {
+    vorhandenFuer = fuer;
+    verfahrenAnpassen(entwurf.verfahren);
+  });
+
+  /** Prüft Schlüssel bzw. Zertifikate und zeigt, was fehlt. Gibt die Prüfung zurück (oder `null` ohne Schutz). */
   const pgpPruefen = async (): Promise<VersandPruefung | null> => {
+    await verfahrenBereit;
     const daten = lesen();
     if (!daten.verschluesseln && !daten.signieren) {
       pgpHinweis.replaceChildren();
@@ -114,7 +202,7 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
       return null;
     }
     const pruefung = await api.pgpVersandPruefen(daten);
-    const hindernis = versandHindernis(pruefung, !!daten.verschluesseln);
+    const hindernis = versandHindernis(pruefung, !!daten.verschluesseln, verfahren);
     if (hindernis) {
       pgpHinweis.textContent = `⚠ ${hindernis}`;
       pgpHinweis.dataset.art = "fehler";
@@ -133,6 +221,12 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
     });
   };
   for (const schalter of [verschluesseln, signieren]) schalter.addEventListener("change", pgpPruefenStill);
+  verfahrenWahl.addEventListener("change", () => {
+    verfahren = verfahrenWahl.value as Verfahren;
+    verfahrenZeigen();
+    if (verschluesseln.checked || signieren.checked) pgpPruefenStill();
+  });
+  von.addEventListener("change", () => verfahrenAnpassen(verfahren));
   for (const empfaenger of [an, cc, bcc, von]) {
     empfaenger.addEventListener("change", () => {
       if (verschluesseln.checked || signieren.checked) pgpPruefenStill();
@@ -208,20 +302,27 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
         return;
       }
       if (pruefung) {
-        const hindernis = versandHindernis(pruefung, !!daten.verschluesseln);
+        const hindernis = versandHindernis(pruefung, !!daten.verschluesseln, verfahren);
         if (hindernis) {
           statusSetzen(`Nicht gesendet. ${hindernis}`, "fehler");
           return;
         }
         if (pruefung.passphrase_fuer) {
+          const smime = verfahren === "smime";
           const passphrase = await passphraseAbfragen({
             titel: "Passphrase zum Signieren",
-            text: `Zum Signieren wird die Passphrase deines Schlüssels benötigt.\nSchlüssel: ${pruefung.passphrase_fuer}`,
+            text: smime
+              ? `Zum Signieren wird die Passphrase deines S/MIME-Zertifikats benötigt.\nZertifikat: ${pruefung.passphrase_fuer}`
+              : `Zum Signieren wird die Passphrase deines Schlüssels benötigt.\nSchlüssel: ${pruefung.passphrase_fuer}`,
             ja: "Entsperren und senden",
           });
           if (passphrase === null) return;
           try {
-            await api.pgpEntsperren(pruefung.passphrase_fuer, passphrase);
+            if (smime) {
+              await api.smimeEntsperren(pruefung.passphrase_fuer, passphrase);
+            } else {
+              await api.pgpEntsperren(pruefung.passphrase_fuer, passphrase);
+            }
           } catch (fehler) {
             statusSetzen(fehlertext(fehler), "fehler");
             return;

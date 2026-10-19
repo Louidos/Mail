@@ -692,7 +692,13 @@ fn signatur_pruefen(
     let zeit = angaben.zeit.filter(|z| *z <= jetzt).unwrap_or(jetzt);
     let mut kette = mitgelieferte(cms);
     kette.extend(ring.bekannte.iter().cloned());
-    pruefung.signatur = match kette_pruefen(&signierer, kette, &ring.wurzeln, zeit) {
+    pruefung.signatur = match kette_pruefen(
+        &signierer,
+        kette,
+        &ring.wurzeln,
+        zeit,
+        X509PurposeId::SMIME_SIGN,
+    ) {
         Kette::Gueltig => {
             if !zertifikat::zweck_passt(&signierer, Zweck::Signieren) {
                 pruefung.meldung =
@@ -734,15 +740,21 @@ fn signatur_pruefen(
 
 /// Ergebnis der Kettenprüfung.
 #[derive(Debug, PartialEq, Eq)]
-enum Kette {
+pub(crate) enum Kette {
     Gueltig,
     Abgelaufen,
     FalscherZweck,
     Unbekannt,
 }
 
-/// Prüft die Kette von `zertifikat` zu einer der `wurzeln` zum Zeitpunkt `zeit`.
-fn kette_pruefen(zertifikat: &X509Ref, zwischen: Vec<X509>, wurzeln: &[X509], zeit: i64) -> Kette {
+/// Prüft die Kette von `zertifikat` zu einer der `wurzeln` zum Zeitpunkt `zeit` für `zweck`.
+pub(crate) fn kette_pruefen(
+    zertifikat: &X509Ref,
+    zwischen: Vec<X509>,
+    wurzeln: &[X509],
+    zeit: i64,
+    zweck: X509PurposeId,
+) -> Kette {
     let pruefen = || -> Result<i32, openssl::error::ErrorStack> {
         let mut bauer = X509StoreBuilder::new()?;
         for wurzel in wurzeln {
@@ -753,7 +765,7 @@ fn kette_pruefen(zertifikat: &X509Ref, zwischen: Vec<X509>, wurzeln: &[X509], ze
         // `time_t` ist je nach System verschieden breit.
         #[allow(clippy::useless_conversion)]
         parameter.set_time(zeit.try_into().unwrap_or_default());
-        parameter.set_purpose(X509PurposeId::SMIME_SIGN)?;
+        parameter.set_purpose(zweck)?;
         bauer.set_param(&parameter)?;
         let speicher = bauer.build();
         let zwischen =

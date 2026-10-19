@@ -259,17 +259,19 @@ export interface Entwurf {
   antwort_auf?: string | null;
   referenzen: string[];
   anhaenge: AnhangAuswahl[];
-  /** Mit OpenPGP verschlüsseln; fehlt ein Empfängerschlüssel, wird nicht gesendet. */
+  /** Verschlüsseln; fehlt ein Empfängerschlüssel bzw. -zertifikat, wird nicht gesendet. */
   verschluesseln?: boolean;
-  /** Mit OpenPGP signieren. */
+  /** Signieren. */
   signieren?: boolean;
+  /** Verfahren für „Verschlüsseln“ und „Signieren“ (Standard: OpenPGP). */
+  verfahren?: Verfahren;
 }
 
-/** Ergebnis der Prüfung vor dem Senden mit OpenPGP. */
+/** Ergebnis der Prüfung vor dem Senden mit OpenPGP oder S/MIME. */
 export interface VersandPruefung {
   fehlende_empfaenger: string[];
   eigener_fehlt: boolean;
-  /** Fingerabdruck des eigenen Schlüssels, dessen Passphrase zum Signieren fehlt. */
+  /** Fingerabdruck des eigenen Schlüssels bzw. Zertifikats, dessen Passphrase zum Signieren fehlt. */
   passphrase_fuer: string | null;
 }
 

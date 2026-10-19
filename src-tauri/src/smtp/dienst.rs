@@ -12,8 +12,10 @@ use super::nachricht::{self, AnhangDaten};
 use crate::fehler::{Fehlermeldung, VerbindungsFehler};
 use crate::imap::dienst::ImapDienst;
 use crate::konto::KontoVerwaltung;
-use crate::pgp::lesen::Verschluesselung;
+use crate::pgp::lesen::{Verfahren, Verschluesselung};
 use crate::pgp::{PgpDienst, VersandSchluessel};
+use crate::smime::schreiben::Versand as SmimeVersand;
+use crate::smime::SmimeDienst;
 use crate::tls::VERBINDUNGS_ZEITLIMIT;
 
 /// Ergebnis eines erfolgreichen Versands.
@@ -30,7 +32,15 @@ pub struct SendeDienst {
     imap: Arc<ImapDienst>,
     /// Zum Entschlüsseln weitergeleiteter Anhänge aus verschlüsselten Mails.
     pgp: Option<Arc<PgpDienst>>,
+    /// S/MIME (#56): Verschlüsseln, Signieren und weitergeleitete Anhänge.
+    smime: Option<Arc<SmimeDienst>>,
     pub register: AnhangRegister,
+}
+
+/// Vorbereiteter Schutz für den Versand.
+enum Vorbereitet {
+    Pgp(Box<VersandSchluessel>),
+    Smime(SmimeVersand),
 }
 
 impl SendeDienst {
@@ -39,6 +49,7 @@ impl SendeDienst {
             konten,
             imap,
             pgp: None,
+            smime: None,
             register: AnhangRegister::default(),
         }
     }
@@ -49,7 +60,13 @@ impl SendeDienst {
         self
     }
 
-    /// Die Mail mit Anhängen so, wie sie angezeigt wird (bei OpenPGP entschlüsselt).
+    /// Mit S/MIME: Verschlüsseln, Signieren und Anhänge S/MIME-verschlüsselter Mails.
+    pub fn mit_smime(mut self, smime: Arc<SmimeDienst>) -> Self {
+        self.smime = Some(smime);
+        self
+    }
+
+    /// Die Mail mit Anhängen so, wie sie angezeigt wird (bei OpenPGP bzw. S/MIME entschlüsselt).
     async fn mail_lesbar(
         &self,
         konto: &str,
@@ -57,13 +74,22 @@ impl SendeDienst {
         uid: u32,
     ) -> Result<Zeroizing<Vec<u8>>, Fehlermeldung> {
         let roh = self.imap.inhalt(konto, ordner, uid).await?;
-        let Some(pgp) = self.pgp.clone() else {
+        if self.pgp.is_none() && self.smime.is_none() {
             return Ok(Zeroizing::new(roh));
-        };
+        }
+        let (pgp, smime) = (self.pgp.clone(), self.smime.clone());
         let kopie = roh.clone();
-        let verarbeitet = tokio::task::spawn_blocking(move || pgp.verarbeiten(&kopie))
-            .await
-            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler beim Entschlüsseln."))?;
+        let verarbeitet = tokio::task::spawn_blocking(move || {
+            if let Some(smime) = smime {
+                let ergebnis = smime.verarbeiten(&kopie);
+                if ergebnis.status != Default::default() {
+                    return ergebnis;
+                }
+            }
+            pgp.map(|p| p.verarbeiten(&kopie)).unwrap_or_default()
+        })
+        .await
+        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler beim Entschlüsseln."))?;
         if verarbeitet.status.verschluesselung == Verschluesselung::NichtEntschluesselt {
             return Err(Fehlermeldung::neu(
                 "pgp",
@@ -96,31 +122,47 @@ impl SendeDienst {
         }
     }
 
-    /// Bei „Verschlüsseln“ oder „Signieren“: Schlüssel zusammenstellen oder mit klarer Meldung
-    /// abbrechen.
-    async fn pgp_vorbereiten(
+    /// Bei „Verschlüsseln“ oder „Signieren“: Schlüssel bzw. Zertifikate des gewählten Verfahrens
+    /// zusammenstellen oder mit klarer Meldung abbrechen.
+    async fn schutz_vorbereiten(
         &self,
         entwurf: &Entwurf,
-    ) -> Result<Option<VersandSchluessel>, Fehlermeldung> {
+    ) -> Result<Option<Vorbereitet>, Fehlermeldung> {
         if !entwurf.verschluesseln && !entwurf.signieren {
             return Ok(None);
         }
-        let pgp = self
-            .pgp
-            .clone()
-            .ok_or_else(|| Fehlermeldung::neu("pgp", "OpenPGP ist nicht verfügbar."))?;
         let adressen = nachricht::alle_empfaenger(entwurf)?;
         let (konto, verschluesseln, signieren) = (
             entwurf.konto.clone(),
             entwurf.verschluesseln,
             entwurf.signieren,
         );
-        tokio::task::spawn_blocking(move || {
-            pgp.versand_vorbereiten(&konto, &adressen, verschluesseln, signieren)
-        })
-        .await
-        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei OpenPGP."))?
-        .map(Some)
+        match entwurf.verfahren {
+            Verfahren::OpenPgp => {
+                let pgp = self
+                    .pgp
+                    .clone()
+                    .ok_or_else(|| Fehlermeldung::neu("pgp", "OpenPGP ist nicht verfügbar."))?;
+                tokio::task::spawn_blocking(move || {
+                    pgp.versand_vorbereiten(&konto, &adressen, verschluesseln, signieren)
+                })
+                .await
+                .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei OpenPGP."))?
+                .map(|v| Some(Vorbereitet::Pgp(Box::new(v))))
+            }
+            Verfahren::Smime => {
+                let smime = self
+                    .smime
+                    .clone()
+                    .ok_or_else(|| Fehlermeldung::neu("smime", "S/MIME ist nicht verfügbar."))?;
+                tokio::task::spawn_blocking(move || {
+                    smime.versand_vorbereiten(&konto, &adressen, verschluesseln, signieren)
+                })
+                .await
+                .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei S/MIME."))?
+                .map(|v| Some(Vorbereitet::Smime(v)))
+            }
+        }
     }
 
     async fn anhaenge_laden(&self, entwurf: &Entwurf) -> Result<Vec<AnhangDaten>, Fehlermeldung> {
@@ -178,13 +220,17 @@ impl SendeDienst {
     ) -> Result<SendeErgebnis, Fehlermeldung> {
         let konto = self.konten.finden(&entwurf.konto).await?;
         // Schlüssel zuerst: Fehlt etwas, wird gar nichts gesendet (nie unbemerkt unverschlüsselt).
-        let schluessel = self.pgp_vorbereiten(entwurf).await?;
+        let schutz = self.schutz_vorbereiten(entwurf).await?;
         let anhaenge = self.anhaenge_laden(entwurf).await?;
         let nachricht = {
             let (konto, entwurf) = (konto.clone(), entwurf.clone());
             // Verschlüsseln und Schlüsselableitung brauchen Rechenzeit.
             tokio::task::spawn_blocking(move || {
-                nachricht::bauen_mit(&konto, &entwurf, &anhaenge, schluessel.as_ref())
+                let schutz = schutz.as_ref().map(|s| match s {
+                    Vorbereitet::Pgp(p) => nachricht::Schutz::Pgp(p),
+                    Vorbereitet::Smime(s) => nachricht::Schutz::Smime(s),
+                });
+                nachricht::bauen_geschuetzt(&konto, &entwurf, &anhaenge, schutz)
             })
             .await
             .map_err(|_| {

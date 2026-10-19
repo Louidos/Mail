@@ -25,6 +25,11 @@ function warVerschluesselt(mail: AufbereiteteMail): boolean {
   return (mail.pgp?.verschluesselung ?? "keine") !== "keine";
 }
 
+/** Bei verschlüsselten Mails antwortet man mit demselben Verfahren (OpenPGP oder S/MIME). */
+function verfahrenWie(mail: AufbereiteteMail): Pick<Entwurf, "verfahren"> {
+  return warVerschluesselt(mail) && mail.pgp?.verfahren ? { verfahren: mail.pgp.verfahren } : {};
+}
+
 /** Adresse für ein Empfängerfeld; Namen mit Sonderzeichen in Anführungszeichen. */
 export function adresseFormatieren(a: Adresse): string {
   if (!a.name) return a.adresse;
@@ -74,6 +79,7 @@ export function antwortEntwurf(mail: AufbereiteteMail, konto: Konto, allen: bool
     referenzen: [...mail.referenzen],
     verschluesseln: warVerschluesselt(mail),
     signieren: warVerschluesselt(mail),
+    ...verfahrenWie(mail),
   };
 }
 
@@ -93,6 +99,7 @@ export function weiterleitenEntwurf(mail: AufbereiteteMail, konto: Konto): Entwu
     text: `\n\n${kopf.join("\n")}\n\n${mail.text}`,
     verschluesseln: warVerschluesselt(mail),
     signieren: warVerschluesselt(mail),
+    ...verfahrenWie(mail),
   };
 }
 
