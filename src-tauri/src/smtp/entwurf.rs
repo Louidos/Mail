@@ -34,6 +34,12 @@ pub struct Entwurf {
     pub referenzen: Vec<String>,
     #[serde(default)]
     pub anhaenge: Vec<AnhangAuswahl>,
+    /// Mit OpenPGP verschlüsseln (#44). Fehlt ein Empfängerschlüssel, wird nicht gesendet.
+    #[serde(default)]
+    pub verschluesseln: bool,
+    /// Mit OpenPGP signieren (#44).
+    #[serde(default)]
+    pub signieren: bool,
 }
 
 /// So wird ein Entwurf gespeichert: Anhänge mit ihrer Quelle statt mit Token,
@@ -84,6 +90,22 @@ pub fn aus_speicherform(
 mod tests {
     use super::*;
     use crate::smtp::anhaenge::Quelle;
+
+    #[test]
+    fn alte_entwuerfe_ohne_openpgp_felder_laden() {
+        let register = AnhangRegister::default();
+        let alt = r#"{"konto":"k1","an":"bea@example.org","betreff":"Alt","text":"x"}"#;
+        let entwurf = aus_speicherform("e1", alt, &register).unwrap();
+        assert!(!entwurf.verschluesseln && !entwurf.signieren);
+        let mut neu = entwurf.clone();
+        neu.verschluesseln = true;
+        let gespeichert = speicherform(&neu, &register).unwrap();
+        assert!(
+            aus_speicherform("e1", &gespeichert, &register)
+                .unwrap()
+                .verschluesseln
+        );
+    }
 
     #[test]
     fn entwurf_mit_anhang_speichern_und_laden() {

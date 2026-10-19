@@ -104,6 +104,15 @@ describe("Antworten und Weiterleiten", () => {
     expect(e.antwort_auf).toBeUndefined();
   });
 
+  it("wählt bei Antworten auf verschlüsselte Mails „Verschlüsseln“ vor", () => {
+    expect(antwortEntwurf(mail, konto, false).verschluesseln).toBe(false);
+    const verschluesselt = { ...mail, pgp: { ...mail.pgp, verschluesselung: "entschluesselt" as const } };
+    const antwort = antwortEntwurf(verschluesselt, konto, false);
+    expect(antwort.verschluesseln).toBe(true);
+    expect(antwort.signieren).toBe(true);
+    expect(weiterleitenEntwurf(verschluesselt, konto).verschluesseln).toBe(true);
+  });
+
   it("formatiert Adressen", () => {
     expect(adresseFormatieren({ name: null, adresse: "a@example.org" })).toBe("a@example.org");
     expect(adresseFormatieren({ name: "A. B.", adresse: "a@example.org" })).toBe('"A. B." <a@example.org>');
@@ -174,6 +183,89 @@ describe("Verfassen-Fenster", () => {
     expect(dialog.querySelector(".anhang-name")?.textContent).toBe("Bericht.pdf");
     knopf("Entfernen").click();
     expect(dialog.querySelector(".anhang-name")).toBeNull();
+  });
+
+  function pgpBackend(pruefung: object, gesendet: string[] = []) {
+    invoke.mockImplementation((befehl: string, args: { entwurf?: object }) => {
+      gesendet.push(befehl);
+      if (befehl === "pgp_versand_pruefen") return Promise.resolve(pruefung);
+      if (befehl === "entwurf_speichern") return Promise.resolve({ ...args.entwurf, id: "e1" });
+      if (befehl === "mail_senden") return Promise.resolve({ abgelegt: true, hinweis: null });
+      return Promise.resolve(undefined);
+    });
+  }
+
+  const ohneHindernis = { fehlende_empfaenger: [], eigener_fehlt: false, passphrase_fuer: null };
+
+  it("sendet verschlüsselt nicht, wenn ein Empfängerschlüssel fehlt, und nennt ihn", async () => {
+    pgpBackend({ ...ohneHindernis, fehlende_empfaenger: ["carl@example.org"] });
+    const dialog = verfassenOeffnen({
+      konten: [konto],
+      entwurf: { ...leererEntwurf("k1"), an: "bea@example.org, carl@example.org", betreff: "Geheim", verschluesseln: true },
+    });
+    await warten();
+    expect((dialog.querySelector("[name=verschluesseln]") as HTMLInputElement).checked).toBe(true);
+    expect(dialog.querySelector(".pgp-hinweis")?.textContent).toContain("carl@example.org");
+    dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    await warten();
+    expect(invoke).not.toHaveBeenCalledWith("mail_senden", expect.anything());
+    expect(dialog.querySelector(".status")?.textContent).toMatch(/Nicht gesendet.*carl@example.org/);
+    expect(document.body.contains(dialog)).toBe(true);
+  });
+
+  it("verlangt einen eigenen Schlüssel", async () => {
+    pgpBackend({ ...ohneHindernis, eigener_fehlt: true });
+    const dialog = verfassenOeffnen({
+      konten: [konto],
+      entwurf: { ...leererEntwurf("k1"), an: "bea@example.org", betreff: "x", signieren: true },
+    });
+    dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    await warten();
+    expect(invoke).not.toHaveBeenCalledWith("mail_senden", expect.anything());
+    expect(dialog.querySelector(".status")?.textContent).toContain("keinen eigenen Schlüssel");
+  });
+
+  it("fragt zum Signieren nach der Passphrase und sendet erst danach", async () => {
+    const befehle: string[] = [];
+    pgpBackend({ ...ohneHindernis, passphrase_fuer: "AAAA 1111" }, befehle);
+    const gesendet = vi.fn();
+    const dialog = verfassenOeffnen({
+      konten: [konto],
+      entwurf: { ...leererEntwurf("k1"), an: "bea@example.org", betreff: "x", verschluesseln: true, signieren: true },
+      gesendet,
+    });
+    dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    await warten();
+    const frage = document.querySelector("dialog.passphrase") as HTMLDialogElement;
+    expect(frage.textContent).toContain("AAAA 1111");
+    (frage.querySelector("input[type=password]") as HTMLInputElement).value = "meine-passphrase";
+    frage.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    await warten();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("pgp_entsperren", { fingerabdruck: "AAAA 1111", passphrase: "meine-passphrase" });
+    expect(befehle.indexOf("pgp_entsperren")).toBeLessThan(befehle.indexOf("mail_senden"));
+    const senden = invoke.mock.calls.find((c) => c[0] === "mail_senden")!;
+    expect(senden[1].entwurf).toMatchObject({ verschluesseln: true, signieren: true });
+    expect(gesendet).toHaveBeenCalled();
+  });
+
+  it("sendet nicht, wenn die Passphrase-Abfrage abgebrochen wird", async () => {
+    pgpBackend({ ...ohneHindernis, passphrase_fuer: "AAAA 1111" });
+    const dialog = verfassenOeffnen({
+      konten: [konto],
+      entwurf: { ...leererEntwurf("k1"), an: "bea@example.org", betreff: "x", signieren: true },
+    });
+    dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    await warten();
+    knopf("Abbrechen").click();
+    await warten();
+    expect(invoke).not.toHaveBeenCalledWith("mail_senden", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("pgp_entsperren", expect.anything());
   });
 
   it("schliesst nicht mit Escape, damit kein Text verloren geht", () => {

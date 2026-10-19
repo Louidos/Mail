@@ -222,6 +222,18 @@ export interface Entwurf {
   antwort_auf?: string | null;
   referenzen: string[];
   anhaenge: AnhangAuswahl[];
+  /** Mit OpenPGP verschlüsseln; fehlt ein Empfängerschlüssel, wird nicht gesendet. */
+  verschluesseln?: boolean;
+  /** Mit OpenPGP signieren. */
+  signieren?: boolean;
+}
+
+/** Ergebnis der Prüfung vor dem Senden mit OpenPGP. */
+export interface VersandPruefung {
+  fehlende_empfaenger: string[];
+  eigener_fehlt: boolean;
+  /** Fingerabdruck des eigenen Schlüssels, dessen Passphrase zum Signieren fehlt. */
+  passphrase_fuer: string | null;
 }
 
 export interface SendeErgebnis {
@@ -283,4 +295,5 @@ export const api = {
   pgpLoeschen: (fingerabdruck: string) => invoke<void>("pgp_loeschen", { fingerabdruck }),
   pgpEntsperren: (fingerabdruck: string, passphrase: string) =>
     invoke<void>("pgp_entsperren", { fingerabdruck, passphrase }),
+  pgpVersandPruefen: (entwurf: Entwurf) => invoke<VersandPruefung>("pgp_versand_pruefen", { entwurf }),
 };

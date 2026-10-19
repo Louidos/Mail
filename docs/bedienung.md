@@ -131,6 +131,7 @@ abzufragen:
 - Standardmässig wird reiner Text gesendet. **Zusätzlich als einfaches HTML senden** fügt eine einfache HTML-Fassung
   hinzu (Links anklickbar, keine Bilder oder Skripte).
 - **Datei anhängen …** öffnet die Dateiauswahl; insgesamt sind bis 25 MB möglich.
+- **Verschlüsseln** und **Signieren** mit OpenPGP: siehe [Verschlüsselung mit OpenPGP](#verschlüsselt-und-signiert-senden).
 - **Senden**: SicherMail sichert den Text zuerst als Entwurf und verschickt die Mail dann verschlüsselt über SMTP.
   Danach wird sie im Ordner „Gesendet“ abgelegt (siehe unten).
 - Schlägt das Senden fehl (z. B. Server nicht erreichbar), bleibt das Fenster offen, du siehst eine klare Meldung,
@@ -233,7 +234,25 @@ Links unten öffnet **Schlüssel (OpenPGP)** die Schlüsselverwaltung.
 - Entschlüsselte Mails werden genauso sicher angezeigt wie alle anderen (keine Skripte, externe Inhalte blockiert).
 - Im lokalen Speicher bleibt nur die verschlüsselte Fassung; der entschlüsselte Text wird nirgends abgelegt.
 - Erkannt werden PGP/MIME (wie von Thunderbird, Enigmail, Mailvelope …) und Inline-PGP im Text.
-- Mails verschlüsselt **senden** kommt in einem nächsten Schritt.
+
+### Verschlüsselt und signiert senden
+
+Im Schreibfenster stehen zwei Schalter:
+
+- **Verschlüsseln (OpenPGP)**: Nur Empfänger mit dem passenden privaten Schlüssel können Text und Anhänge lesen.
+  Dafür brauchst du von **jedem** Empfänger (An, Cc und Bcc) den öffentlichen Schlüssel und einen eigenen Schlüssel.
+  Fehlt einer, nennt SicherMail die Empfänger und **sendet nicht** – auch nicht unverschlüsselt. Importiere dann die
+  Schlüssel oder schalte „Verschlüsseln“ bewusst aus.
+- **Signieren (OpenPGP)**: Empfänger können prüfen, dass die Mail von dir stammt und unverändert ist. Beim ersten
+  Senden fragt SicherMail nach der Passphrase deines Schlüssels; sie bleibt bis zum Beenden im Arbeitsspeicher.
+- Antwortest du auf eine verschlüsselte Mail (oder leitest sie weiter), sind beide Schalter schon eingeschaltet.
+- Verschlüsselte Mails werden immer auch an deinen eigenen Schlüssel verschlüsselt; so kannst du sie im Ordner
+  „Gesendet“ weiterhin lesen.
+- **Bcc** bei Verschlüsselung: Jeder Bcc-Empfänger bekommt eine eigene, nur für ihn verschlüsselte Mail. So erfahren
+  die anderen Empfänger nichts von ihm.
+- **Nicht verschlüsselt** werden Betreff, Absender, Empfänger und Datum – schreibe Vertrauliches nicht in den Betreff.
+- Entwürfe liegen nur auf diesem Gerät (nie auf dem Server); in der Entwürfe-Liste sind verschlüsselte mit 🔒
+  markiert.
 
 ## Wo liegen meine Daten?
 

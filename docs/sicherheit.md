@@ -118,6 +118,20 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 - **Signaturen** gelten nur als gültig, wenn eine User-ID des Schlüssels zur Absenderadresse passt; sonst steht ein
   deutlicher Hinweis. Unbekannte Schlüssel, ungültige (veränderte) Signaturen und nur teilweise signierte Mails
   werden ausdrücklich so gekennzeichnet. Bei PGP/MIME wird über die kanonische Form (CRLF) geprüft.
+- **Verschlüsselt senden** (PGP/MIME, RFC 3156): Ist „Verschlüsseln“ gewählt, braucht jeder Empfänger in An, Cc und
+  Bcc einen importierten öffentlichen Schlüssel, sonst wird **nicht** gesendet und der fehlende Empfänger genannt –
+  SicherMail sendet nie unbemerkt unverschlüsselt. Das prüft die Oberfläche vorab und das Backend beim Senden noch
+  einmal. Text und Anhänge werden gemeinsam verschlüsselt (SEIPD mit MDC, AES-256), immer auch an den eigenen
+  Schlüssel, damit „Gesendet“ lesbar bleibt. Signiert wird innerhalb der Verschlüsselung (SHA-256).
+- **Bcc**: Jeder Bcc-Empfänger bekommt eine eigene Nachricht, nur an seinen Schlüssel verschlüsselt. In der Nachricht
+  für An/Cc stehen so keine Schlüssel-IDs der Bcc-Empfänger, und kein Bcc-Empfänger erfährt von anderen. Gewählt statt
+  „versteckter Schlüssel-IDs“ in einer gemeinsamen Nachricht, weil dort jeder Empfänger alle Schlüssel durchprobieren
+  müsste und manche Programme solche Nachrichten schlecht lesen.
+- **Nur signiert**: `multipart/signed` mit abgetrennter Signatur über die kanonische Form des Inhalts.
+- **Entwürfe** liegen nie auf dem Server, sondern nur auf diesem Gerät: in `mails.db` (SQLCipher), bzw. nur im
+  Arbeitsspeicher, wenn „Mails lokal speichern“ aus ist. Das gilt auch für Entwürfe verschlüsselter Mails.
+- **Passphrase zum Signieren** wird beim Senden abgefragt und – wie beim Lesen – nur bis zum Programmende im
+  Arbeitsspeicher gehalten.
 
 ### Tauri und Oberfläche
 
@@ -164,8 +178,10 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 
 ## Was bewusst nicht abgedeckt ist
 
-- **Verschlüsseln beim Senden** folgt in einem zweiten Schritt (#44); bis dahin liest SicherMail OpenPGP nur
-  (entschlüsseln und prüfen). S/MIME wird nicht unterstützt.
+- **Mit OpenPGP geschützt ist nur der Inhalt**: Text und Anhänge verschlüsselter Mails liegen auch auf dem Server
+  verschlüsselt. **Metadaten** wie Betreff, Absender, Empfänger und Datum stehen weiterhin im Klartext im Kopf der Mail.
+  Unverschlüsselte Mails liegen auf dem Server so, wie der Server sie speichert.
+- **Kein S/MIME** (geplant in [#56](https://github.com/Louidos/Mail/issues/56)).
 - **OpenPGP-Schlüsselverwaltung ohne Vertrauensnetz**: Ablauf und Widerruf von Schlüsseln werden nicht ausgewertet,
   Beglaubigungen (Web of Trust) nicht geprüft. Ob ein Schlüssel wirklich der Person gehört, muss der Nutzer über den
   Fingerabdruck selbst prüfen.

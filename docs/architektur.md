@@ -120,6 +120,15 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 ## Mails senden (`smtp`)
 
 - **Verbindung** wie bei IMAP über `tls` (TLS oder STARTTLS-Pflicht, gleiches Pinning), danach Übergabe an `lettre`.
+- **OpenPGP beim Senden**: `Entwurf` hat `verschluesseln` und `signieren` (Standard aus, ältere Entwürfe laden
+  unverändert). `SendeDienst::pgp_vorbereiten` holt über `PgpDienst::versand_vorbereiten` die Schlüssel aller
+  Empfänger, den eigenen Schlüssel und – zum Signieren – die entsperrte Passphrase; fehlt etwas, bricht es mit einer
+  Fehlerart (`pgp_schluessel_fehlt`, `pgp_kein_eigener`, `pgp_passphrase`) ab, bevor irgendetwas gesendet wird. Die
+  Oberfläche fragt vorab mit `pgp_versand_pruefen`. `nachricht::bauen_mit` erzeugt aus derselben inneren MIME-Entität
+  `multipart/encrypted` bzw. `multipart/signed` (signiert wird die Entität ohne das CRLF, das nach RFC 2046 zum
+  folgenden Begrenzer gehört). Ergebnis sind `Sendung`en: eine für An/Cc und bei Verschlüsselung eine eigene je
+  Bcc-Empfänger; die Kopie für „Gesendet“ ist die An/Cc-Fassung mit Bcc-Kopf. Bauen und Verschlüsseln laufen in
+  `spawn_blocking`.
 - **Nachricht** (`nachricht`): `lettre`-Builder mit Message-ID `<uuid@domain-des-absenders>`, `In-Reply-To` und
   `References` bei Antworten, `text/plain` (optional `multipart/alternative` mit einfachem, maskiertem HTML) und
   Anhängen als `multipart/mixed`. Bcc steht nur im Umschlag; die Kopie für „Gesendet“ behält den Bcc-Kopf.
@@ -160,6 +169,9 @@ Aufbau:
   Teils und Klartextsignaturen. Ergebnis: `PgpStatus` (Verschlüsselung, Signatur, Signierer, Meldung, ggf.
   Fingerabdruck, dessen Passphrase fehlt) und eine anzeigbare Fassung (äussere Kopfzeilen ohne `Content-*` plus
   entschlüsselte innere MIME-Entität).
+- `schreiben`: verschlüsselt eine MIME-Entität (SEIPD v1 mit MDC, AES-256, Signatur innerhalb; Unterschlüssel mit
+  Verschlüsselungsrecht, sonst der Hauptschlüssel) bzw. erzeugt eine abgetrennte Signatur (SHA-256, `micalg=pgp-sha256`);
+  signiert wird mit einem Unterschlüssel mit Signierrecht, sonst dem Hauptschlüssel.
 - `PgpDienst`: öffnet den Speicher beim ersten Zugriff, hält Passphrasen nur im Arbeitsspeicher und baut daraus den
   Schlüsselring. Rechenintensives (S2K, Entschlüsseln) läuft in `spawn_blocking`. `mail_anzeigen`,
   `anhang_speichern`, `mail_anhaenge_uebernehmen` und der Versand weitergeleiteter Anhänge verwenden die entschlüsselte
