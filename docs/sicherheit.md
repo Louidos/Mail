@@ -28,6 +28,7 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
   Die Oberfläche warnt deutlich.
 - Im SMTP-EHLO steht `[127.0.0.1]` statt des Rechnernamens.
 - Autoconfig fragt nur die Domain der eigenen Adresse über HTTPS (mindestens TLS 1.2), keine zentralen Datenbanken.
+  Weiterleitungen werden nur innerhalb dieser Domain verfolgt.
 
 ### Zugangsdaten
 
@@ -37,6 +38,10 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 - Passwörter werden im Speicher mit `zeroize` gelöscht, erscheinen in keiner `Debug`-Ausgabe, keiner Fehlermeldung
   und keinem Log. SicherMail schreibt keine Logs mit Zugangsdaten.
 - Ein Konto wird erst gespeichert, wenn die Anmeldung bei IMAP und SMTP geklappt hat.
+- Beim Bearbeiten wird das gespeicherte Passwort nur verwendet, solange Server, Ports, Verschlüsselung, hinterlegtes
+  Zertifikat und Benutzername unverändert sind. Sonst muss es neu eingegeben werden – so kann es nicht an einen
+  anderen (oder vertippten) Server gehen.
+- Beim Löschen eines Kontos wird zuerst der Schlüsselbund-Eintrag entfernt; scheitert das, bleibt das Konto bestehen.
 
 ### Lokale Daten (SQLCipher)
 
@@ -54,10 +59,18 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
   Navigation des Hauptfensters) und eigener Content-Security-Policy, die nur eingebettete `data:`-Bilder erlaubt.
 - Externe Inhalte sind standardmässig blockiert. Auf Wunsch (pro Mail oder dauerhaft pro Absender) lädt das Backend
   Bilder – nur über HTTPS, nur Bildformate, mit Grössengrenzen, ohne Cookies und Referer – und setzt sie als
-  `data:`-Adressen ein. Die Anzeige selbst baut nie Verbindungen auf.
+  `data:`-Adressen ein. Die Anzeige selbst baut nie Verbindungen auf. Adressen im eigenen Netz (localhost, private
+  und Link-Local-Adressen, Namen ohne Punkt) werden nie geladen – auch nicht über Weiterleitungen oder DNS.
+- Die Freigabe „für diesen Absender immer erlauben“ hängt an der Absenderadresse, die gefälscht sein kann; die
+  Oberfläche weist darauf hin.
 - Links öffnen sich erst nach einem Klick im Standardbrowser (nur `https:`, `http:`, `mailto:`). Weicht der angezeigte
-  Text von der echten Adresse ab (oder enthält die Adresse Punycode), warnt SicherMail.
-- Anhänge werden nie automatisch geöffnet, nur über „Speichern unter“ abgelegt (Dateiname gesäubert).
+  Text von der echten Adresse ab (oder enthält die Adresse Punycode), warnt SicherMail. Geprüft wird der sichtbare,
+  vereinheitlichte Text ohne unsichtbare Zeichen; jede Adresse im Linktext zählt, nicht nur ein reiner Adresstext.
+- Bei `mailto:`-Links gibt SicherMail nur `subject`, `body`, `cc` und `bcc` an das Mailprogramm weiter, nie z. B.
+  `attach=` (Anhängen lokaler Dateien).
+- Anhänge werden nie automatisch geöffnet, nur über „Speichern unter“ abgelegt. Der Dateiname wird gesäubert: keine
+  Pfade, keine Steuer-, Schreibrichtungs- oder unsichtbaren Zeichen (`Rechnung<U+202E>fdp.exe`), keine reservierten
+  Windows-Namen.
 
 ### Tauri und Oberfläche
 
@@ -105,3 +118,5 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 - **Anhänge** werden nicht auf Schadsoftware geprüft.
 - **Nur IMAP/SMTP**: kein POP3, kein Exchange/EWS.
 - Server, die nur veraltete TLS-Versionen (unter 1.2) können, werden nicht unterstützt.
+- **Hinterlegte Zertifikate** (Pinning) werden genau so akzeptiert, wie sie hinterlegt wurden; Ablaufdatum und
+  Hostname des hinterlegten Zertifikats werden nicht zusätzlich geprüft. Läuft es ab, sollte es ersetzt werden.

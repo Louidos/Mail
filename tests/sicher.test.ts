@@ -52,6 +52,37 @@ describe("linkPruefen", () => {
     expect(linkPruefen("Newsletter abbestellen", "mailto:abmelden@example.org")).toBeNull();
   });
 
+  it("lässt sich nicht mit verstecktem oder getarntem Text umgehen", () => {
+    const ziel = "https://boese.example/login";
+    expect(linkPruefen("paypal.com\u200b", ziel)).toMatch(/„paypal.com“/);
+    expect(linkPruefen("paypal.com.", ziel)).toMatch(/Phishing/);
+    expect(linkPruefen("Login: paypal.com", ziel)).toMatch(/Phishing/);
+    expect(linkPruefen("Jetzt bei www.paypal.com anmelden", ziel)).toMatch(/Phishing/);
+    expect(linkPruefen("p\u0430ypal.com", "https://paypal.com/")).toMatch(/Phishing/);
+    expect(linkPruefen("\u202epaypal.com", ziel)).toMatch(/Phishing/);
+  });
+
+  it("warnt, wenn eine Webadresse in Wahrheit eine Mail schreibt", () => {
+    expect(linkPruefen("https://bank.ch", "mailto:boese@example.net")).toMatch(/schreibt aber eine Mail/);
+  });
+
+  it("warnt nicht bei Dateinamen, Subdomains und gewöhnlichem Text", () => {
+    expect(linkPruefen("Bericht.pdf herunterladen", "https://cdn.example.org/x")).toBeNull();
+    expect(linkPruefen("meine-bank.ch", "https://login.meine-bank.ch/")).toBeNull();
+    expect(linkPruefen("Mehr erfahren …", "https://example.org/")).toBeNull();
+    expect(linkPruefen("z.B. hier", "https://example.org/")).toBeNull();
+  });
+
+  it("nimmt bei Links im iframe nur den sichtbaren Text", () => {
+    const dokument = document.implementation.createHTMLDocument("");
+    dokument.body.innerHTML = '<a href="https://boese.example">paypal.com<span>x y</span></a>';
+    const a = dokument.querySelector("a") as HTMLElement;
+    Object.defineProperty(a, "innerText", { value: "paypal.com" });
+    const [klick] = linksVorbereiten(dokument);
+    expect(klick.text).toBe("paypal.com");
+    expect(linkPruefen(klick.text, klick.href)).toMatch(/Phishing/);
+  });
+
   it("warnt bei Punycode-Adressen", () => {
     expect(linkPruefen("Konto prüfen", "https://xn--pple-43d.com/")).toMatch(/Sonderzeichen/);
   });

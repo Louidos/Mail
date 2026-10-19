@@ -206,10 +206,11 @@ impl KontoVerwaltung {
 
     /// Testet die Verbindung mit den eingegebenen Daten, ohne etwas zu speichern.
     ///
-    /// Ist beim Bearbeiten kein neues Passwort angegeben, wird das gespeicherte verwendet.
+    /// Ist beim Bearbeiten kein neues Passwort angegeben, wird das gespeicherte verwendet
+    /// (nur solange Server und Benutzername unverändert sind).
     pub async fn testen(&self, eingabe: &KontoEingabe) -> Result<Pruefergebnis, Fehlermeldung> {
         eingabe.pruefen()?;
-        let passwort = self.passwort_fuer(eingabe)?;
+        let passwort = self.passwort_fuer(eingabe).await?;
         let konto = eingabe.in_konto(eingabe.id.clone().unwrap_or_default());
         Ok(verbindung_testen(&konto, &passwort).await)
     }
@@ -220,7 +221,7 @@ impl KontoVerwaltung {
     /// wird nichts gespeichert.
     pub async fn speichern(&self, eingabe: &KontoEingabe) -> Result<Konto, Fehlermeldung> {
         eingabe.pruefen()?;
-        let passwort = self.passwort_fuer(eingabe)?;
+        let passwort = self.passwort_fuer(eingabe).await?;
         let id = eingabe
             .id
             .clone()
@@ -270,16 +271,37 @@ impl KontoVerwaltung {
                 "Dieses Konto gibt es nicht mehr.",
             ));
         }
-        datei::speichern(&self.datei, &konten)?;
+        // Erst den Schlüsselbund-Eintrag, dann die Datei: Ist der Schlüsselbund gesperrt,
+        // bleibt das Konto bestehen und das Löschen kann wiederholt werden.
         self.schluesselbund
             .loeschen(&schluesselbund::konto_schluessel(id))?;
+        datei::speichern(&self.datei, &konten)?;
         Ok(())
     }
 
-    fn passwort_fuer(&self, eingabe: &KontoEingabe) -> Result<Zeroizing<String>, Fehlermeldung> {
+    /// Passwort für Test und Speichern: das neu eingegebene oder – beim Bearbeiten – das
+    /// gespeicherte. Das gespeicherte wird nur verwendet, wenn Benutzername und Server
+    /// unverändert sind; sonst könnte es an einen anderen (oder vertippten) Server gehen.
+    async fn passwort_fuer(
+        &self,
+        eingabe: &KontoEingabe,
+    ) -> Result<Zeroizing<String>, Fehlermeldung> {
         match (&eingabe.passwort, &eingabe.id) {
             (Some(passwort), _) if !passwort.is_empty() => Ok(passwort.clone()),
-            (_, Some(id)) => self.passwort(id),
+            (_, Some(id)) => {
+                let bisher = self.finden(id).await?;
+                let neu = eingabe.in_konto(id.clone());
+                if bisher.benutzername != neu.benutzername
+                    || bisher.imap != neu.imap
+                    || bisher.smtp != neu.smtp
+                {
+                    return Err(Fehlermeldung::neu(
+                        "eingabe",
+                        "Server oder Benutzername wurden geändert. Bitte das Passwort erneut eingeben.",
+                    ));
+                }
+                self.passwort(id)
+            }
             _ => Err(Fehlermeldung::neu("eingabe", "Bitte das Passwort angeben.")),
         }
     }
@@ -351,5 +373,52 @@ mod tests {
     fn klartext_verschluesselung_gibt_es_nicht() {
         let json = r#"{"host":"x","port":143,"verschluesselung":"keine"}"#;
         assert!(serde_json::from_str::<ServerEinstellung>(json).is_err());
+    }
+
+    #[tokio::test]
+    async fn gespeichertes_passwort_geht_nicht_an_geaenderten_server() {
+        let ordner = tempfile::tempdir().unwrap();
+        let schluesselbund = Arc::new(schluesselbund::SpeicherSchluesselbund::default());
+        let verwaltung = KontoVerwaltung::neu(ordner.path(), schluesselbund.clone());
+        let konto = beispiel_eingabe().in_konto("k1".into());
+        datei::speichern(&ordner.path().join("konten.json"), &[konto]).unwrap();
+        schluesselbund
+            .setzen(&schluesselbund::konto_schluessel("k1"), "geheim-123")
+            .unwrap();
+
+        let geaendert = |aendern: fn(&mut KontoEingabe)| {
+            let mut e = beispiel_eingabe();
+            e.id = Some("k1".into());
+            e.passwort = None;
+            aendern(&mut e);
+            e
+        };
+        for eingabe in [
+            geaendert(|e| e.imap.host = "imap.angreifer.example".into()),
+            geaendert(|e| e.smtp.host = "smtp.angreifer.example".into()),
+            geaendert(|e| e.imap.port = 1993),
+            geaendert(|e| e.benutzername = "jemand".into()),
+        ] {
+            let fehler = verwaltung.testen(&eingabe).await.unwrap_err();
+            assert_eq!(fehler.art, "eingabe");
+            let fehler = verwaltung.speichern(&eingabe).await.unwrap_err();
+            assert_eq!(fehler.art, "eingabe");
+        }
+    }
+
+    #[tokio::test]
+    async fn loeschen_entfernt_konto_und_passwort() {
+        let ordner = tempfile::tempdir().unwrap();
+        let schluesselbund = Arc::new(schluesselbund::SpeicherSchluesselbund::default());
+        let verwaltung = KontoVerwaltung::neu(ordner.path(), schluesselbund.clone());
+        let konto = beispiel_eingabe().in_konto("k1".into());
+        datei::speichern(&ordner.path().join("konten.json"), &[konto]).unwrap();
+        schluesselbund
+            .setzen(&schluesselbund::konto_schluessel("k1"), "geheim-123")
+            .unwrap();
+
+        verwaltung.loeschen("k1").await.unwrap();
+        assert!(verwaltung.alle().await.unwrap().is_empty());
+        assert_eq!(schluesselbund.anzahl(), 0);
     }
 }

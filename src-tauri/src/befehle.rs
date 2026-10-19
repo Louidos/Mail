@@ -276,6 +276,34 @@ pub fn link_erlaubt(url: &str) -> bool {
             || klein.starts_with("mailto:"))
 }
 
+/// Bei `mailto:`-Links nur harmlose Angaben an das Mailprogramm weitergeben.
+///
+/// Parameter wie `attach=` könnten manche Mailprogramme dazu bringen, beliebige lokale
+/// Dateien anzuhängen. Erlaubt sind nur `subject`, `body`, `cc` und `bcc`.
+pub fn link_entschaerfen(url: &str) -> String {
+    if !url
+        .get(..7)
+        .is_some_and(|s| s.eq_ignore_ascii_case("mailto:"))
+    {
+        return url.to_string();
+    }
+    let Some((adresse, abfrage)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let erlaubt: Vec<&str> = abfrage
+        .split('&')
+        .filter(|teil| {
+            let name = teil.split('=').next().unwrap_or("").to_ascii_lowercase();
+            matches!(name.as_str(), "subject" | "body" | "cc" | "bcc")
+        })
+        .collect();
+    if erlaubt.is_empty() {
+        adresse.to_string()
+    } else {
+        format!("{adresse}?{}", erlaubt.join("&"))
+    }
+}
+
 /// Öffnet einen Link im Standardbrowser (nur http, https und mailto).
 #[tauri::command]
 pub async fn link_oeffnen(app: AppHandle, url: String) -> Result<(), Fehlermeldung> {
@@ -286,7 +314,7 @@ pub async fn link_oeffnen(app: AppHandle, url: String) -> Result<(), Fehlermeldu
         ));
     }
     app.opener()
-        .open_url(url, None::<&str>)
+        .open_url(link_entschaerfen(&url), None::<&str>)
         .map_err(|_| Fehlermeldung::neu("link", "Der Link konnte nicht geöffnet werden."))
 }
 
@@ -455,5 +483,25 @@ mod tests {
         assert!(!link_erlaubt("smb://server/freigabe"));
         assert!(!link_erlaubt("https://example.org/\nboese"));
         assert!(!link_erlaubt("https://example.org/ leer"));
+    }
+
+    #[test]
+    fn mailto_gibt_keine_anhaenge_weiter() {
+        assert_eq!(
+            link_entschaerfen("mailto:x@example.org?attach=~/.ssh/id_rsa&subject=Hallo"),
+            "mailto:x@example.org?subject=Hallo"
+        );
+        assert_eq!(
+            link_entschaerfen("MAILTO:x@example.org?Attachment=/etc/passwd"),
+            "MAILTO:x@example.org"
+        );
+        assert_eq!(
+            link_entschaerfen("mailto:x@example.org?cc=y@example.org&body=Text"),
+            "mailto:x@example.org?cc=y@example.org&body=Text"
+        );
+        assert_eq!(
+            link_entschaerfen("https://example.org/?attach=1"),
+            "https://example.org/?attach=1"
+        );
     }
 }

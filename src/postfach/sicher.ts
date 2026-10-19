@@ -58,33 +58,70 @@ function hostVon(adresse: string): string | null {
   }
 }
 
-const SIEHT_AUS_WIE_ADRESSE = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?([/?#]\S*)?$/i;
+const SIEHT_AUS_WIE_ADRESSE = /^(https?:\/\/)?([\p{L}\p{N}-]+\.)+\p{L}{2,}(:\d+)?([/?#]\S*)?$/iu;
 const SIEHT_AUS_WIE_MAIL = /^(mailto:)?[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+/** Unsichtbare Zeichen und Schreibrichtungs-Steuerzeichen, mit denen sich Linktext tarnen lässt. */
+const UNSICHTBAR = /[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+
+/** Endungen, die wie eine Adresse aussehen, aber meist Dateinamen sind („Bericht.pdf“). */
+const DATEIENDUNGEN = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "txt", "csv", "rtf",
+  "zip", "jpg", "jpeg", "png", "gif", "webp", "svg", "mp3", "mp4", "ics", "vcf", "xml", "json",
+  "htm", "html", "exe", "msi", "eml",
+]);
+
+/** Text so, wie ihn der Nutzer liest: Unicode vereinheitlicht, ohne unsichtbare Zeichen. */
+function lesbar(text: string): string {
+  return text.normalize("NFKC").replace(UNSICHTBAR, "").trim();
+}
+
+/**
+ * Alle Hostnamen, die der angezeigte Text als Adresse vortäuscht – auch mitten im Text
+ * („Anmelden unter paypal.com“). Nicht-ASCII-Namen werden dabei in Punycode umgewandelt,
+ * damit z. B. ein kyrillisches „а“ nicht wie das echte Ziel aussieht.
+ */
+function angezeigteHosts(text: string): string[] {
+  const hosts: string[] = [];
+  for (const wort of text.split(/[\s<>"'()[\]{}|,;!]+/u)) {
+    const kandidat = wort.replace(/^[:.]+|[.:?]+$/gu, "");
+    if (!SIEHT_AUS_WIE_ADRESSE.test(kandidat)) continue;
+    const host = hostVon(/^https?:\/\//i.test(kandidat) ? kandidat : `https://${kandidat}`);
+    if (!host) continue;
+    const endung = host.split(".").pop() ?? "";
+    if (!/^https?:\/\//i.test(kandidat) && DATEIENDUNGEN.has(endung)) continue;
+    hosts.push(host);
+  }
+  return hosts;
+}
 
 /**
  * Prüft einen Link. Gibt eine Warnung zurück, wenn der angezeigte Text eine andere
  * Adresse vortäuscht als das echte Ziel, oder `null`.
  */
 export function linkPruefen(text: string, href: string): string | null {
-  const angezeigt = text.trim();
+  const angezeigt = lesbar(text);
   const ziel = href.trim();
   if (ziel.toLowerCase().startsWith("mailto:")) {
+    const zielAdresse = decodeURIComponent(ziel.slice(7).split("?")[0]).toLowerCase();
     if (SIEHT_AUS_WIE_MAIL.test(angezeigt)) {
       const textAdresse = angezeigt.replace(/^mailto:/i, "").toLowerCase();
-      const zielAdresse = decodeURIComponent(ziel.slice(7).split("?")[0]).toLowerCase();
       if (textAdresse !== zielAdresse) {
         return `Der Link zeigt die Adresse „${angezeigt}“ an, schreibt aber an „${zielAdresse}“.`;
       }
+      return null;
+    }
+    if (angezeigteHosts(angezeigt).length > 0) {
+      return `Der Link sieht aus wie eine Webadresse, schreibt aber eine Mail an „${zielAdresse}“.`;
     }
     return null;
   }
   const zielHost = hostVon(ziel);
   if (!zielHost) return null;
-  if (SIEHT_AUS_WIE_ADRESSE.test(angezeigt)) {
-    const textHost = hostVon(/^https?:\/\//i.test(angezeigt) ? angezeigt : `https://${angezeigt}`);
-    if (textHost && textHost !== zielHost) {
-      return `Der Link zeigt „${angezeigt}“ an, führt aber zu „${zielHost}“. Das ist typisch für Betrugsversuche (Phishing).`;
-    }
+  // Eine Subdomain der angezeigten Adresse (login.bank.ch bei „bank.ch“) gehört demselben Betreiber.
+  const fremd = angezeigteHosts(angezeigt).find((host) => host !== zielHost && !zielHost.endsWith(`.${host}`));
+  if (fremd) {
+    return `Der Link zeigt „${fremd}“ an, führt aber zu „${zielHost}“. Das ist typisch für Betrugsversuche (Phishing).`;
   }
   if (zielHost.split(".").some((teil) => teil.startsWith("xn--"))) {
     return `Die Adresse „${zielHost}“ enthält Sonderzeichen, die bekannten Adressen zum Verwechseln ähnlich sehen können.`;
@@ -109,6 +146,15 @@ export function textMitLinks(text: string): DocumentFragment {
   }
   fragment.append(text.slice(letztes));
   return fragment;
+}
+
+/**
+ * Der Text eines Links, wie er tatsächlich angezeigt wird. Versteckte Teile
+ * (`display:none`) zählen nicht, sonst liesse sich die Warnung damit umgehen.
+ */
+function sichtbarerText(a: Element): string {
+  const gerendert = (a as HTMLElement).innerText;
+  return typeof gerendert === "string" ? gerendert : (a.textContent ?? "");
 }
 
 /** Ein Klick auf einen Link: Ziel und angezeigter Text. */
@@ -136,7 +182,7 @@ export function linksVorbereiten(dokument: Document): LinkKlick[] {
     a.removeAttribute("target");
     a.removeAttribute("ping");
     if (!href) continue;
-    links.push({ href, text: a.textContent ?? "" });
+    links.push({ href, text: sichtbarerText(a) });
     a.setAttribute("title", href);
     a.setAttribute("href", `about:blank${LINK_MARKE}${links.length - 1}`);
   }
@@ -206,7 +252,7 @@ export function linksAbfangen(bereich: Document | HTMLElement, beiKlick: (klick:
     if (!a) return;
     ereignis.preventDefault();
     const href = a.getAttribute("href");
-    if (href) beiKlick({ href, text: a.textContent ?? "" });
+    if (href) beiKlick({ href, text: sichtbarerText(a) });
   });
   // Formulare gibt es nach der Bereinigung nicht; falls doch, nie absenden.
   bereich.addEventListener("submit", (ereignis) => ereignis.preventDefault());
