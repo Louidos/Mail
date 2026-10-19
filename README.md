@@ -20,7 +20,7 @@ Version: **0.0.0** (in Entwicklung, noch keine veröffentlichte Version)
 - [x] Mails empfangen (IMAP, IDLE)
 - [x] Mails sicher anzeigen
 - [x] Verschlüsselter lokaler Speicher
-- [ ] Mails senden (SMTP)
+- [x] Mails senden (SMTP)
 
 Änderungen stehen im [CHANGELOG](CHANGELOG.md).
 

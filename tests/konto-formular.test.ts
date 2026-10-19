@@ -28,6 +28,10 @@ function formular(): HTMLFormElement {
     zertifikat.name = `${art}_zertifikat`;
     form.append(zertifikat);
   }
+  const ablegen = document.createElement("input");
+  ablegen.type = "checkbox";
+  ablegen.name = "gesendet_ablegen";
+  form.append(ablegen);
   return form;
 }
 
@@ -38,6 +42,7 @@ const konto: Konto = {
   benutzername: "anna",
   imap: { host: "imap.example.org", port: 993, verschluesselung: "tls" },
   smtp: { host: "smtp.example.org", port: 587, verschluesselung: "starttls", zertifikat: "PEM" },
+  gesendet_ablegen: false,
 };
 
 const gueltig: KontoEingabe = { ...konto, passwort: "geheim" };

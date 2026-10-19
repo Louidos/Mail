@@ -100,3 +100,19 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 - Tabellen `ordner_stand` (UIDVALIDITY/UIDNEXT je Ordner) und `mails` (Kopfdaten und optional Inhalt je UID).
 - Die Oberfläche zeigt die Mailliste sofort aus dem Speicher (`mails_lokal`) und gleicht danach mit dem Server ab.
   Der Beobachter lädt die Inhalte der neuesten 50 Mails im Posteingang (bis 5 MB je Mail) für das Lesen ohne Internet vor.
+
+## Mails senden (`smtp`)
+
+- **Verbindung** wie bei IMAP über `tls` (TLS oder STARTTLS-Pflicht, gleiches Pinning), danach Übergabe an `lettre`.
+- **Nachricht** (`nachricht`): `lettre`-Builder mit Message-ID `<uuid@domain-des-absenders>`, `In-Reply-To` und
+  `References` bei Antworten, `text/plain` (optional `multipart/alternative` mit einfachem, maskiertem HTML) und
+  Anhängen als `multipart/mixed`. Bcc steht nur im Umschlag; die Kopie für „Gesendet“ behält den Bcc-Kopf.
+- **Anhänge** (`anhaenge`): Das Frontend kennt nur Tokens. Dateien kommen ausschliesslich über den Backend-Dialog
+  (`anhang_waehlen`) oder als Anhänge einer weitergeleiteten Mail ins Register; so kann Code in der Oberfläche keine
+  beliebigen Dateien verschicken. Höchstens 25 MB pro Mail.
+- **Ablauf** (`dienst::SendeDienst`): Die Oberfläche speichert den Entwurf, dann wird gesendet. Erfolg → Entwurf löschen,
+  per `IMAP APPEND` mit `\Seen` in „Gesendet“ ablegen (Ordner bei Bedarf anlegen; ein Fehler dabei ist nur ein Hinweis).
+  Fehler → Entwurf erneut sichern, Fehlermeldung mit Hinweis „als Entwurf gespeichert“.
+- **Entwürfe** liegen im Zwischenspeicher (`MailCache`): in SQLCipher (`entwuerfe`) oder im Arbeitsspeicher.
+  Anhänge werden mit ihrer Quelle gespeichert und beim Laden neu ins Register eingetragen. „Lokalen Speicher leeren“
+  lässt Entwürfe stehen; beim Umschalten des Speichers werden sie übernommen.

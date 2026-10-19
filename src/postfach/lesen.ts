@@ -5,6 +5,8 @@ import { datumLang, groesse } from "./format";
 import { linksAbfangen, mailRahmenMitLinks, textMitLinks, type LinkKlick } from "./sicher";
 
 export interface LeseAktionen {
+  antworten: (mail: AufbereiteteMail, allen: boolean) => void;
+  weiterleiten: (mail: AufbereiteteMail) => void;
   gelesenUmschalten: (mail: MailKopf) => void;
   loeschen: (mail: MailKopf) => void;
   verschieben: (mail: MailKopf, ziel: string) => void;
@@ -147,6 +149,14 @@ export function leseansicht(
   nurText.addEventListener("change", () => aktionen.nurTextUmschalten(nurText.checked));
 
   const mail = inhalt.art === "fertig" ? inhalt.mail : null;
+  const antworten = el("button", { type: "button", class: "klein haupt", disabled: !mail }, "Antworten");
+  const allenAntworten = el("button", { type: "button", class: "klein", disabled: !mail }, "Allen antworten");
+  const weiterleiten = el("button", { type: "button", class: "klein", disabled: !mail }, "Weiterleiten");
+  if (mail) {
+    antworten.addEventListener("click", () => aktionen.antworten(mail, false));
+    allenAntworten.addEventListener("click", () => aktionen.antworten(mail, true));
+    weiterleiten.addEventListener("click", () => aktionen.weiterleiten(mail));
+  }
   const von = mail?.von.length
     ? mail.von.map(adresseText).join(", ")
     : kopf.absender && kopf.absender !== kopf.absender_adresse
@@ -164,6 +174,9 @@ export function leseansicht(
     el(
       "div",
       { class: "werkzeuge" },
+      antworten,
+      allenAntworten,
+      weiterleiten,
       gelesenKnopf,
       verschieben,
       loeschenKnopf,

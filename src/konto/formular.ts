@@ -43,6 +43,7 @@ function serverLesen(form: HTMLFormElement, art: ServerArt): ServerEinstellung {
 /** Liest die Eingaben des Dialogs aus. */
 export function formularLesen(form: HTMLFormElement, id: string | null): KontoEingabe {
   const passwort = wert(form, "passwort");
+  const ablegen = form.elements.namedItem("gesendet_ablegen");
   return {
     id,
     name: wert(form, "name").trim(),
@@ -51,6 +52,7 @@ export function formularLesen(form: HTMLFormElement, id: string | null): KontoEi
     passwort: passwort === "" ? null : passwort,
     imap: serverLesen(form, "imap"),
     smtp: serverLesen(form, "smtp"),
+    gesendet_ablegen: ablegen instanceof HTMLInputElement ? ablegen.checked : true,
   };
 }
 
@@ -70,6 +72,8 @@ export function formularFuellen(form: HTMLFormElement, konto: Konto): void {
   setzen(form, "passwort", "");
   serverFuellen(form, "imap", konto.imap);
   serverFuellen(form, "smtp", konto.smtp);
+  const ablegen = form.elements.namedItem("gesendet_ablegen");
+  if (ablegen instanceof HTMLInputElement) ablegen.checked = konto.gesendet_ablegen;
 }
 
 /**

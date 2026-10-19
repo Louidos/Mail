@@ -133,6 +133,12 @@ export function kontoDialogOeffnen(konto: Konto | null, gespeichert: (konto: Kon
     ),
     serverBereich("imap"),
     serverBereich("smtp"),
+    el(
+      "label",
+      { class: "umschalter" },
+      el("input", { type: "checkbox", name: "gesendet_ablegen", checked: true }),
+      "Gesendete Mails im Ordner „Gesendet“ ablegen (ausschalten, wenn der Server das selbst tut)",
+    ),
     status,
     el("div", { class: "knoepfe" }, abbrechenKnopf, testKnopf, speichernKnopf),
   );

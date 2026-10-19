@@ -1,9 +1,23 @@
 /** Grundoberfläche von SicherMail: Konten und Ordner, Mailliste, Leseansicht. */
 import { listen } from "@tauri-apps/api/event";
-import { api, fehlertext, MAIL_EREIGNIS, type Konto, type MailEreignis, type MailKopf, type Ordner } from "./api";
+import {
+  api,
+  fehlertext,
+  MAIL_EREIGNIS,
+  type AufbereiteteMail,
+  type Entwurf,
+  type Konto,
+  type MailEreignis,
+  type MailKopf,
+  type Ordner,
+  type SendeErgebnis,
+} from "./api";
 import { bestaetigen } from "./dialoge";
 import { el } from "./dom";
 import { einstellungenOeffnen } from "./einstellungen/dialog";
+import { verfassenOeffnen } from "./verfassen/dialog";
+import { entwuerfeOeffnen } from "./verfassen/entwuerfe";
+import { antwortEntwurf, leererEntwurf, weiterleitenEntwurf } from "./verfassen/zitat";
 import { kontoDialogOeffnen } from "./konto/dialog";
 import { datumKurz, ordnerKurzname, ordnerTiefe } from "./postfach/format";
 import { leseansicht, type Inhalt } from "./postfach/lesen";
@@ -77,7 +91,9 @@ export class App {
 
   /** Baut die Oberfläche auf, lädt die Konten und hört auf Ereignisse des Backends. */
   async starten(): Promise<void> {
-    const hinzufuegen = el("button", { type: "button", class: "haupt breit" }, "Konto hinzufügen");
+    const neueMail = el("button", { type: "button", class: "haupt breit" }, "Neue Mail");
+    neueMail.addEventListener("click", () => this.verfassen(null));
+    const hinzufuegen = el("button", { type: "button", class: "breit" }, "Konto hinzufügen");
     hinzufuegen.addEventListener("click", () => kontoDialogOeffnen(null, () => void this.kontenLaden()));
     const einstellungen = el("button", { type: "button", class: "breit" }, "Einstellungen");
     einstellungen.addEventListener("click", () => void einstellungenOeffnen(() => void this.mailsLaden(false)));
@@ -85,6 +101,7 @@ export class App {
       "aside",
       { class: "seitenleiste" },
       el("h1", {}, "SicherMail"),
+      neueMail,
       this.kontenBereich,
       hinzufuegen,
       einstellungen,
@@ -335,6 +352,69 @@ export class App {
     await this.mailEntfernen(mail, () => api.mailLoeschen(auswahl.konto, auswahl.ordner, mail.uid));
   }
 
+  /** Konto der aktuellen Auswahl (oder das erste). */
+  private aktuellesKonto(): Konto | null {
+    const id = this.zustand.auswahl?.konto;
+    return this.zustand.konten.find((k) => k.id === id) ?? this.zustand.konten[0] ?? null;
+  }
+
+  /** Öffnet das Verfassen-Fenster mit einem Entwurf (oder leer). */
+  verfassen(entwurf: Entwurf | null): void {
+    const konto = this.aktuellesKonto();
+    if (!konto) {
+      this.meldungZeigen("Bitte zuerst ein Konto einrichten.");
+      return;
+    }
+    verfassenOeffnen({
+      konten: this.zustand.konten,
+      entwurf: entwurf ?? leererEntwurf(konto.id),
+      gesendet: (ergebnis) => this.gesendet(ergebnis),
+    });
+  }
+
+  private antworten(mail: AufbereiteteMail, allen: boolean): void {
+    const konto = this.aktuellesKonto();
+    if (konto) this.verfassen(antwortEntwurf(mail, konto, allen));
+  }
+
+  private async weiterleiten(mail: AufbereiteteMail): Promise<void> {
+    const { auswahl, offen } = this.zustand;
+    const konto = this.aktuellesKonto();
+    if (!konto || !auswahl || !offen) return;
+    const entwurf = weiterleitenEntwurf(mail, konto);
+    if (mail.anhaenge.length > 0) {
+      try {
+        entwurf.anhaenge = await api.mailAnhaengeUebernehmen(auswahl.konto, auswahl.ordner, offen.uid);
+      } catch (fehler) {
+        this.meldungZeigen(`Anhänge konnten nicht übernommen werden: ${fehlertext(fehler)}`);
+      }
+    }
+    this.verfassen(entwurf);
+  }
+
+  private gesendet(ergebnis: SendeErgebnis): void {
+    this.meldungZeigen(ergebnis.hinweis ?? "Die Mail wurde gesendet.");
+    // Der Ordner „Gesendet“ wurde eventuell gerade angelegt.
+    for (const konto of this.zustand.konten) void this.ordnerLaden(konto.id);
+    const ordner = this.zustand.auswahl ? this.zustand.ordner.get(this.zustand.auswahl.konto) : undefined;
+    const aktuell = ordner?.find((o) => o.name === this.zustand.auswahl?.ordner);
+    if (aktuell?.sonder === "gesendet") void this.mailsLaden(false);
+  }
+
+  private meldungTimer: ReturnType<typeof setTimeout> | null = null;
+  private meldung: string | null = null;
+
+  /** Kurze Rückmeldung unten in der Statusleiste. */
+  private meldungZeigen(text: string): void {
+    this.meldung = text;
+    this.statusZeichnen();
+    if (this.meldungTimer) clearTimeout(this.meldungTimer);
+    this.meldungTimer = setTimeout(() => {
+      this.meldung = null;
+      this.statusZeichnen();
+    }, 8000);
+  }
+
   private zeichnen(): void {
     this.kontenZeichnen();
     this.listeZeichnen();
@@ -350,6 +430,8 @@ export class App {
         bearbeiten.addEventListener("click", () => kontoDialogOeffnen(konto, () => void this.kontenLaden()));
         const loeschen = el("button", { type: "button", class: "klein gefahr" }, "Löschen");
         loeschen.addEventListener("click", () => void this.kontoLoeschen(konto));
+        const entwuerfe = el("button", { type: "button", class: "klein" }, "Entwürfe");
+        entwuerfe.addEventListener("click", () => void entwuerfeOeffnen(konto, (e) => this.verfassen(e)));
 
         const liste = el("ul", { class: "ordner" });
         for (const o of ordner.get(konto.id) ?? []) {
@@ -376,7 +458,7 @@ export class App {
           el("div", { class: "konto-adresse" }, konto.email),
           fehler ? el("p", { class: "fehler klein-text" }, fehler) : null,
           liste,
-          el("div", { class: "konto-knoepfe" }, bearbeiten, loeschen),
+          el("div", { class: "konto-knoepfe" }, entwuerfe, bearbeiten, loeschen),
         );
       }),
     );
@@ -453,6 +535,8 @@ export class App {
     }
     this.leseBereich.replaceChildren(
       leseansicht(offen, auswahl.ordner, ordner ?? [], inhalt ?? { art: "laedt" }, { nurText, hinweis }, {
+        antworten: (mail, allen) => this.antworten(mail, allen),
+        weiterleiten: (mail) => void this.weiterleiten(mail),
         gelesenUmschalten: (mail) => void this.gelesenSetzen(mail, !mail.gelesen),
         loeschen: (mail) => void this.mailLoeschen(mail),
         verschieben: (mail, ziel) =>
@@ -474,6 +558,7 @@ export class App {
       const name = this.zustand.konten.find((k) => k.id === id)?.name ?? "Konto";
       return el("div", { class: "verbindung-getrennt" }, `${name}: ${text}`);
     });
+    if (this.meldung) meldungen.push(el("div", { class: "meldung" }, this.meldung));
     this.statusLeiste.replaceChildren(...meldungen);
   }
 

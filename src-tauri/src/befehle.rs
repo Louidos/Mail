@@ -21,6 +21,9 @@ use crate::imap::ordner::Ordner;
 use crate::konto::autoconfig::{self, Vorschlag};
 use crate::konto::schluesselbund::Schluesselbund;
 use crate::konto::{Konto, KontoEingabe, KontoVerwaltung, Pruefergebnis};
+use crate::smtp::anhaenge::{AnhangAuswahl, Eintrag, Quelle};
+use crate::smtp::dienst::{SendeDienst, SendeErgebnis};
+use crate::smtp::entwurf::Entwurf;
 use crate::speicher::{self, SqlCache};
 
 /// Höchstens so viele Mails pro Seite.
@@ -33,6 +36,7 @@ pub struct AppZustand {
     pub beobachter: Arc<Beobachter>,
     pub melder: Melder,
     pub einstellungen: Arc<EinstellungsSpeicher>,
+    pub senden: Arc<SendeDienst>,
     pub schluesselbund: Arc<dyn Schluesselbund>,
     pub datenordner: PathBuf,
     /// Hinweis, falls der verschlüsselte Speicher nicht geöffnet werden konnte.
@@ -312,6 +316,12 @@ pub async fn lokal_speichern_setzen(
     let alt = zustand.imap.cache();
     let (neu, hinweis) =
         AppZustand::speicher_einrichten(&zustand.datenordner, zustand.schluesselbund.as_ref(), an);
+    // Entwürfe sind Texte des Nutzers: in den neuen Speicher übernehmen (älteste zuerst).
+    for konto in zustand.konten.alle().await? {
+        for (id, daten) in alt.entwuerfe(&konto.id)?.into_iter().rev() {
+            neu.entwurf_speichern(&id, &konto.id, &daten)?;
+        }
+    }
     zustand.imap.cache_ersetzen(neu);
     zustand.imap.vorladen_setzen(an && hinweis.is_none());
     if let Ok(mut h) = zustand.speicher_hinweis.lock() {
@@ -340,6 +350,94 @@ pub async fn absender_extern_entfernen(
     adresse: String,
 ) -> Result<(), Fehlermeldung> {
     zustand.einstellungen.extern_entfernen(&adresse).await
+}
+
+/// Öffnet den Dialog „Datei anhängen“ (im Backend) und trägt die Dateien ins Register ein.
+#[tauri::command]
+pub async fn anhang_waehlen(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+) -> Result<Vec<AnhangAuswahl>, Fehlermeldung> {
+    let (sender, empfaenger) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Dateien anhängen")
+        .pick_files(move |dateien| {
+            let _ = sender.send(dateien);
+        });
+    let Some(dateien) = empfaenger.await.ok().flatten() else {
+        return Ok(Vec::new());
+    };
+    dateien
+        .into_iter()
+        .map(|datei| {
+            let pfad = datei
+                .into_path()
+                .map_err(|_| Fehlermeldung::neu("anhang", "Ungültige Datei."))?;
+            zustand.senden.register.datei_eintragen(pfad)
+        })
+        .collect()
+}
+
+/// Übernimmt die Anhänge einer Mail (zum Weiterleiten).
+#[tauri::command]
+pub async fn mail_anhaenge_uebernehmen(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: String,
+    uid: u32,
+) -> Result<Vec<AnhangAuswahl>, Fehlermeldung> {
+    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let nachricht = anzeige::parsen(&roh)?;
+    Ok(anzeige::anhaenge(&nachricht)
+        .into_iter()
+        .map(|a| {
+            zustand.senden.register.eintragen(Eintrag {
+                name: a.name,
+                typ: a.typ,
+                groesse: a.groesse as u64,
+                quelle: Quelle::Mail {
+                    konto: konto.clone(),
+                    ordner: ordner.clone(),
+                    uid,
+                    index: a.index,
+                },
+            })
+        })
+        .collect())
+}
+
+/// Sendet eine Mail. Bei einem Fehler wird sie als Entwurf gespeichert.
+#[tauri::command]
+pub async fn mail_senden(
+    zustand: State<'_, AppZustand>,
+    entwurf: Entwurf,
+) -> Result<SendeErgebnis, Fehlermeldung> {
+    zustand.senden.senden(&entwurf).await
+}
+
+#[tauri::command]
+pub async fn entwurf_speichern(
+    zustand: State<'_, AppZustand>,
+    entwurf: Entwurf,
+) -> Result<Entwurf, Fehlermeldung> {
+    zustand.senden.entwurf_speichern(&entwurf).await
+}
+
+#[tauri::command]
+pub async fn entwuerfe_auflisten(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+) -> Result<Vec<Entwurf>, Fehlermeldung> {
+    zustand.senden.entwuerfe(&konto)
+}
+
+#[tauri::command]
+pub async fn entwurf_loeschen(
+    zustand: State<'_, AppZustand>,
+    id: String,
+) -> Result<(), Fehlermeldung> {
+    zustand.senden.entwurf_loeschen(&id)
 }
 
 #[cfg(test)]

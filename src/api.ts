@@ -20,6 +20,8 @@ export interface Konto {
   benutzername: string;
   imap: ServerEinstellung;
   smtp: ServerEinstellung;
+  /** Gesendete Mails im Ordner „Gesendet“ ablegen. */
+  gesendet_ablegen: boolean;
 }
 
 export interface KontoEingabe {
@@ -31,6 +33,7 @@ export interface KontoEingabe {
   passwort?: string | null;
   imap: ServerEinstellung;
   smtp: ServerEinstellung;
+  gesendet_ablegen: boolean;
 }
 
 export interface Fehlermeldung {
@@ -123,6 +126,33 @@ export interface Einstellungen {
   speicher_hinweis: string | null;
 }
 
+/** Ein gewählter Anhang (das Frontend kennt nur das Token, nie den Dateipfad). */
+export interface AnhangAuswahl {
+  token: string;
+  name: string;
+  typ: string;
+  groesse: number;
+}
+
+export interface Entwurf {
+  id?: string | null;
+  konto: string;
+  an: string;
+  cc: string;
+  bcc: string;
+  betreff: string;
+  text: string;
+  html: boolean;
+  antwort_auf?: string | null;
+  referenzen: string[];
+  anhaenge: AnhangAuswahl[];
+}
+
+export interface SendeErgebnis {
+  abgelegt: boolean;
+  hinweis: string | null;
+}
+
 /** Macht aus einem Fehler des Backends einen lesbaren Text. */
 export function fehlertext(fehler: unknown): string {
   if (typeof fehler === "string") return fehler;
@@ -158,4 +188,11 @@ export const api = {
   lokalSpeichernSetzen: (an: boolean) => invoke<void>("lokal_speichern_setzen", { an }),
   lokalenSpeicherLeeren: () => invoke<void>("lokalen_speicher_leeren"),
   absenderExternEntfernen: (adresse: string) => invoke<void>("absender_extern_entfernen", { adresse }),
+  anhangWaehlen: () => invoke<AnhangAuswahl[]>("anhang_waehlen"),
+  mailAnhaengeUebernehmen: (konto: string, ordner: string, uid: number) =>
+    invoke<AnhangAuswahl[]>("mail_anhaenge_uebernehmen", { konto, ordner, uid }),
+  mailSenden: (entwurf: Entwurf) => invoke<SendeErgebnis>("mail_senden", { entwurf }),
+  entwurfSpeichern: (entwurf: Entwurf) => invoke<Entwurf>("entwurf_speichern", { entwurf }),
+  entwuerfeAuflisten: (konto: string) => invoke<Entwurf[]>("entwuerfe_auflisten", { konto }),
+  entwurfLoeschen: (id: string) => invoke<void>("entwurf_loeschen", { id }),
 };

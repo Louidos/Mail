@@ -118,6 +118,12 @@ impl SqlCache {
                      uidnext INTEGER NOT NULL,
                      PRIMARY KEY (konto, ordner)
                  );
+                 CREATE TABLE IF NOT EXISTS entwuerfe (
+                     id TEXT PRIMARY KEY,
+                     konto TEXT NOT NULL,
+                     daten TEXT NOT NULL,
+                     geaendert INTEGER NOT NULL
+                 );
                  CREATE TABLE IF NOT EXISTS mails (
                      konto TEXT NOT NULL,
                      ordner TEXT NOT NULL,
@@ -408,6 +414,7 @@ impl MailCache for SqlCache {
         self.mit(|v| {
             v.execute("DELETE FROM mails WHERE konto = ?1", params![konto])?;
             v.execute("DELETE FROM ordner_stand WHERE konto = ?1", params![konto])?;
+            v.execute("DELETE FROM entwuerfe WHERE konto = ?1", params![konto])?;
             Ok(())
         })
     }
@@ -415,6 +422,39 @@ impl MailCache for SqlCache {
     fn leeren(&self) -> Result<(), Fehlermeldung> {
         self.mit(|v| {
             v.execute_batch("DELETE FROM mails; DELETE FROM ordner_stand; VACUUM;")?;
+            Ok(())
+        })
+    }
+
+    fn entwurf_speichern(&self, id: &str, konto: &str, daten: &str) -> Result<(), Fehlermeldung> {
+        self.mit(|v| {
+            // Laufende Nummer statt Uhrzeit: eindeutige Reihenfolge auch bei schnellen Änderungen.
+            v.execute(
+                "INSERT INTO entwuerfe (id, konto, daten, geaendert)
+                 VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(geaendert), 0) + 1 FROM entwuerfe))
+                 ON CONFLICT (id) DO UPDATE SET konto = ?2, daten = ?3,
+                   geaendert = (SELECT COALESCE(MAX(geaendert), 0) + 1 FROM entwuerfe)",
+                params![id, konto, daten],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn entwuerfe(&self, konto: &str) -> Result<Vec<(String, String)>, Fehlermeldung> {
+        self.mit(|v| {
+            let mut anweisung = v.prepare_cached(
+                "SELECT id, daten FROM entwuerfe WHERE konto = ?1 ORDER BY geaendert DESC",
+            )?;
+            let liste = anweisung
+                .query_map(params![konto], |z| Ok((z.get(0)?, z.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(liste)
+        })
+    }
+
+    fn entwurf_loeschen(&self, id: &str) -> Result<(), Fehlermeldung> {
+        self.mit(|v| {
+            v.execute("DELETE FROM entwuerfe WHERE id = ?1", params![id])?;
             Ok(())
         })
     }

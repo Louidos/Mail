@@ -96,6 +96,41 @@ SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keine
   ab. Prüfe Dateien, bevor du sie öffnest.
 - **Nur Text anzeigen** zeigt statt der HTML-Fassung den reinen Text der Mail.
 
+## Mails schreiben
+
+- **Neue Mail** (oben links) öffnet das Fenster zum Verfassen. Bei mehreren Konten wählst du unter **Von** das Konto.
+- **An**, **Cc** und **Bcc**: mehrere Adressen mit Komma trennen, z. B. `Anna Muster <anna@example.org>, bea@example.org`.
+  Bcc-Empfänger sehen die anderen Empfänger nicht und werden selbst nicht angezeigt.
+- Standardmässig wird reiner Text gesendet. **Zusätzlich als einfaches HTML senden** fügt eine einfache HTML-Fassung
+  hinzu (Links anklickbar, keine Bilder oder Skripte).
+- **Datei anhängen …** öffnet die Dateiauswahl; insgesamt sind bis 25 MB möglich.
+- **Senden**: SicherMail sichert den Text zuerst als Entwurf und verschickt die Mail dann verschlüsselt über SMTP.
+  Danach wird sie im Ordner „Gesendet“ abgelegt (siehe unten).
+- Schlägt das Senden fehl (z. B. Server nicht erreichbar), bleibt das Fenster offen, du siehst eine klare Meldung,
+  und der Text liegt als **Entwurf** bereit. Escape schliesst das Fenster nicht, damit nichts aus Versehen verloren geht.
+- **Als Entwurf speichern** und **Verwerfen** (mit Rückfrage).
+
+### Antworten und weiterleiten
+
+In der Leseansicht:
+
+- **Antworten**: an den Absender (bzw. an die Antwortadresse „Reply-To“), Betreff mit „Re:“, Originaltext zitiert.
+- **Allen antworten**: zusätzlich an alle Empfänger und in Cc, ohne deine eigene Adresse.
+- **Weiterleiten**: Betreff mit „Fwd:“, Kopf und Text der Originalmail, Anhänge werden übernommen.
+
+Antworten setzen die Kopfzeilen `In-Reply-To` und `References`, damit andere Programme sie dem Gespräch zuordnen.
+
+### Entwürfe
+
+Unter jedem Konto öffnet **Entwürfe** die Liste der gespeicherten Entwürfe (zum Öffnen oder Löschen). Entwürfe liegen nur
+auf diesem Gerät – verschlüsselt, solange „Mails lokal speichern“ eingeschaltet ist.
+
+### Ordner „Gesendet“
+
+Gesendete Mails werden per IMAP im Ordner „Gesendet“ des Kontos abgelegt (gibt es keinen, legt SicherMail „Sent“ an).
+Manche Anbieter (z. B. Gmail) tun das selbst; dann im Konto **Gesendete Mails im Ordner „Gesendet“ ablegen** ausschalten,
+sonst liegen sie doppelt dort.
+
 ## Lesen ohne Internet (lokaler Speicher)
 
 Unter **Einstellungen** steht **Mails lokal speichern (verschlüsselt)** – standardmässig eingeschaltet.
