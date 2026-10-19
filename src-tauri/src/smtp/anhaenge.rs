@@ -6,7 +6,7 @@
 //! Oberfläche keine beliebigen Dateien des Rechners verschicken.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,21 @@ use crate::fehler::Fehlermeldung;
 
 /// Höchstgrösse aller Anhänge einer Mail zusammen.
 pub const MAX_GESAMT: u64 = 25 * 1024 * 1024;
+
+/// Liest eine Datei, aber höchstens `erlaubt` Bytes. `None`, wenn sie grösser ist.
+///
+/// Die beim Anhängen gemerkte Grösse kann veraltet sein (die Datei kann seither
+/// gewachsen sein); deshalb zählt beim Senden nur, was tatsächlich gelesen wird.
+pub async fn datei_lesen_begrenzt(pfad: &Path, erlaubt: u64) -> std::io::Result<Option<Vec<u8>>> {
+    use tokio::io::AsyncReadExt;
+    let datei = tokio::fs::File::open(pfad).await?;
+    let mut inhalt = Vec::new();
+    datei
+        .take(erlaubt.saturating_add(1))
+        .read_to_end(&mut inhalt)
+        .await?;
+    Ok((inhalt.len() as u64 <= erlaubt).then_some(inhalt))
+}
 
 /// Woher ein Anhang stammt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +148,22 @@ pub fn typ_aus_name(name: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn dateien_werden_nur_bis_zur_grenze_gelesen() {
+        let ordner = tempfile::tempdir().unwrap();
+        let pfad = ordner.path().join("log.txt");
+        std::fs::write(&pfad, b"12345").unwrap();
+        assert_eq!(
+            datei_lesen_begrenzt(&pfad, 5).await.unwrap(),
+            Some(b"12345".to_vec())
+        );
+        // Die Datei ist gewachsen: wird nicht vollständig gelesen, sondern abgelehnt.
+        assert_eq!(datei_lesen_begrenzt(&pfad, 4).await.unwrap(), None);
+        assert!(datei_lesen_begrenzt(&ordner.path().join("fehlt"), 10)
+            .await
+            .is_err());
+    }
 
     #[test]
     fn nur_eingetragene_anhaenge_sind_verfuegbar() {

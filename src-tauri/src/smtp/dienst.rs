@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tokio::time::timeout;
 
-use super::anhaenge::{AnhangRegister, Quelle, MAX_GESAMT};
+use super::anhaenge::{datei_lesen_begrenzt, AnhangRegister, Quelle, MAX_GESAMT};
 use super::entwurf::{aus_speicherform, speicherform, Entwurf};
 use super::nachricht::{self, AnhangDaten};
 use crate::fehler::{Fehlermeldung, VerbindungsFehler};
@@ -61,24 +61,30 @@ impl SendeDienst {
     }
 
     async fn anhaenge_laden(&self, entwurf: &Entwurf) -> Result<Vec<AnhangDaten>, Fehlermeldung> {
+        let zu_gross = || {
+            Fehlermeldung::neu(
+                "anhang",
+                "Die Anhänge sind zusammen grösser als 25 MB. Viele Mailserver nehmen solche Mails nicht an.",
+            )
+        };
         let mut daten = Vec::new();
         let mut gesamt: u64 = 0;
         for auswahl in &entwurf.anhaenge {
             let eintrag = self.register.holen(&auswahl.token)?;
-            gesamt += eintrag.groesse;
-            if gesamt > MAX_GESAMT {
-                return Err(Fehlermeldung::neu(
-                    "anhang",
-                    "Die Anhänge sind zusammen grösser als 25 MB. Viele Mailserver nehmen solche Mails nicht an.",
-                ));
+            // Schnelle Vorprüfung mit der bekannten Grösse, bevor etwas gelesen wird.
+            if gesamt.saturating_add(eintrag.groesse) > MAX_GESAMT {
+                return Err(zu_gross());
             }
             let inhalt = match &eintrag.quelle {
-                Quelle::Datei { pfad } => tokio::fs::read(pfad).await.map_err(|_| {
-                    Fehlermeldung::neu(
-                        "anhang",
-                        format!("Der Anhang „{}“ konnte nicht gelesen werden.", eintrag.name),
-                    )
-                })?,
+                Quelle::Datei { pfad } => datei_lesen_begrenzt(pfad, MAX_GESAMT - gesamt)
+                    .await
+                    .map_err(|_| {
+                        Fehlermeldung::neu(
+                            "anhang",
+                            format!("Der Anhang „{}“ konnte nicht gelesen werden.", eintrag.name),
+                        )
+                    })?
+                    .ok_or_else(zu_gross)?,
                 Quelle::Mail {
                     konto,
                     ordner,
@@ -89,6 +95,11 @@ impl SendeDienst {
                     crate::anzeige::anhang_inhalt(&roh, *index)?.1
                 }
             };
+            // Massgebend ist die tatsächlich gelesene Grösse.
+            gesamt += inhalt.len() as u64;
+            if gesamt > MAX_GESAMT {
+                return Err(zu_gross());
+            }
             daten.push(AnhangDaten {
                 name: eintrag.name,
                 typ: eintrag.typ,
