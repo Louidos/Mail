@@ -60,7 +60,9 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 - Externe Inhalte sind standardmässig blockiert. Auf Wunsch (pro Mail oder dauerhaft pro Absender) lädt das Backend
   Bilder – nur über HTTPS, nur Bildformate, mit Grössengrenzen, ohne Cookies und Referer – und setzt sie als
   `data:`-Adressen ein. Die Anzeige selbst baut nie Verbindungen auf. Adressen im eigenen Netz (localhost, private
-  und Link-Local-Adressen, Namen ohne Punkt) werden nie geladen – auch nicht über Weiterleitungen oder DNS.
+  und Link-Local-Adressen, Namen ohne Punkt) werden nie geladen – auch nicht über Weiterleitungen, DNS oder einen
+  Proxy. Weil ein Proxy Namen selbst auflöst und diese Prüfung so umgehen würde, verbindet sich SicherMail für externe
+  Bilder immer direkt und benutzt nie einen im System eingestellten Proxy (`HTTPS_PROXY` usw.).
 - Die Freigabe „für diesen Absender immer erlauben“ hängt an der Absenderadresse, die gefälscht sein kann; die
   Oberfläche weist darauf hin.
 - Links öffnen sich erst nach einem Klick im Standardbrowser (nur `https:`, `http:`, `mailto:`). Weicht der angezeigte
@@ -117,6 +119,7 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 - **Metadaten**: Server und Netzbetreiber sehen, wann und mit welchem Server verbunden wird.
 - **Anhänge** werden nicht auf Schadsoftware geprüft.
 - **Nur IMAP/SMTP**: kein POP3, kein Exchange/EWS.
+- **Externe Bilder ohne Proxy**: Wer nur über einen Proxy ins Internet kommt, kann externe Bilder nicht laden.
 - Server, die nur veraltete TLS-Versionen (unter 1.2) können, werden nicht unterstützt.
 - **Hinterlegte Zertifikate** (Pinning) werden genau so akzeptiert, wie sie hinterlegt wurden; Ablaufdatum und
   Hostname des hinterlegten Zertifikats werden nicht zusätzlich geprüft. Läuft es ab, sollte es ersetzt werden.

@@ -7,6 +7,10 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+### Behoben
+
+- Externe Bilder werden nie mehr über einen im System eingestellten Proxy geladen. So gilt die Zusage „keine Adressen im eigenen Netz“ auch mit Proxy. Wer nur über einen Proxy ins Internet kommt, sieht externe Bilder nicht mehr (#24)
+
 ## 0.2.0 – 2026-10-19
 
 ### Geändert

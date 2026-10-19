@@ -79,3 +79,7 @@ path = "../tests/integration/speicher.rs"
 [[test]]
 name = "senden"
 path = "../tests/integration/senden.rs"
+
+[[test]]
+name = "extern_proxy"
+path = "../tests/integration/extern_proxy.rs"
