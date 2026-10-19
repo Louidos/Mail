@@ -421,3 +421,82 @@ p.warnung {
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
+
+.umschalter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--text-leise);
+}
+
+.umschalter input {
+  width: auto;
+}
+
+.extern-leiste {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--warnung-flaeche);
+  color: var(--warnung);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+iframe.mail-rahmen {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.mailtext {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.mailtext a {
+  color: var(--akzent);
+  cursor: pointer;
+}
+
+.anhang-bereich {
+  margin-top: 1rem;
+  border-top: 1px solid var(--rand);
+  padding-top: 0.75rem;
+}
+
+.anhang-bereich h3 {
+  font-size: 1rem;
+  margin: 0 0 0.25rem;
+}
+
+ul.anhaenge {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+ul.anhaenge li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.anhang-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

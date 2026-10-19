@@ -42,10 +42,27 @@ function mail(uid: number, gelesen = false) {
   };
 }
 
+/** Einfache aufbereitete Mail für Tests, die den Inhalt nicht prüfen. */
+const einfacheMail = {
+  betreff: "",
+  von: [],
+  an: [],
+  cc: [],
+  antwort_an: [],
+  datum: null,
+  message_id: null,
+  referenzen: [],
+  text: "Text",
+  html: null,
+  extern_blockiert: 0,
+  extern_geladen: false,
+  anhaenge: [],
+};
+
 /** Antworten des Backends je Befehl. */
 function backend(antworten: Record<string, unknown>) {
   invoke.mockImplementation((befehl: string) => {
-    const antwort = antworten[befehl];
+    const antwort = befehl in antworten ? antworten[befehl] : befehl === "mail_anzeigen" ? einfacheMail : undefined;
     if (antwort instanceof Error) return Promise.reject(antwort);
     return Promise.resolve(typeof antwort === "function" ? (antwort as () => unknown)() : antwort);
   });
@@ -202,5 +219,114 @@ describe("Löschen", () => {
     (ja as HTMLButtonElement).click();
     await warten();
     expect(invoke).toHaveBeenCalledWith("mail_loeschen", { konto: "k1", ordner: "INBOX", uid: 1 });
+  });
+});
+
+describe("Leseansicht", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    document.body.replaceChildren();
+  });
+
+  const aufbereitet = {
+    betreff: "Angebot",
+    von: [{ name: "Bea", adresse: "bea@example.org" }],
+    an: [{ name: null, adresse: "anna@example.org" }],
+    cc: [],
+    antwort_an: [],
+    datum: 1_700_000_000,
+    message_id: "m1@example.org",
+    referenzen: [],
+    text: "Hallo Anna",
+    html: "<p>Hallo <b>Anna</b></p>",
+    extern_blockiert: 2,
+    extern_geladen: false,
+    anhaenge: [{ index: 0, name: "Rechnung.pdf", typ: "application/pdf", groesse: 2048 }],
+  };
+
+  async function oeffnen(antworten: Record<string, unknown> = {}) {
+    const { wurzel, app } = await starten({
+      konten_auflisten: [konto],
+      ordner_auflisten: ordner,
+      mails_auflisten: { mails: [mail(5, true)], auf_server: 1, offline: null, weitere: false },
+      mail_anzeigen: aufbereitet,
+      ...antworten,
+    });
+    (wurzel.querySelector("button.mail") as HTMLButtonElement).click();
+    await warten();
+    await warten();
+    return { wurzel, app };
+  }
+
+  it("zeigt HTML nur im abgeschotteten iframe und blockiert externe Inhalte", async () => {
+    const { wurzel } = await oeffnen();
+    expect(invoke).toHaveBeenCalledWith("mail_anzeigen", { konto: "k1", ordner: "INBOX", uid: 5, externLaden: false });
+    const rahmen = wurzel.querySelector("iframe.mail-rahmen") as HTMLIFrameElement;
+    expect(rahmen.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(rahmen.srcdoc).toContain("<b>Anna</b>");
+    expect(wurzel.querySelector(".lesebereich")?.innerHTML).not.toContain("<b>Anna</b></p></div>");
+    expect(wurzel.querySelector(".extern-leiste")?.textContent).toContain("2 externe Inhalte wurden blockiert");
+  });
+
+  it("lädt externe Inhalte erst nach Klick", async () => {
+    const { wurzel } = await oeffnen();
+    const laden = [...wurzel.querySelectorAll(".extern-leiste button")].find(
+      (k) => k.textContent === "Externe Inhalte laden",
+    ) as HTMLButtonElement;
+    laden.click();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("mail_anzeigen", { konto: "k1", ordner: "INBOX", uid: 5, externLaden: true });
+  });
+
+  it("kann externe Inhalte für einen Absender immer erlauben", async () => {
+    const { wurzel } = await oeffnen({ absender_extern_erlauben: undefined });
+    const immer = [...wurzel.querySelectorAll(".extern-leiste button")].find((k) =>
+      k.textContent?.includes("immer erlauben"),
+    ) as HTMLButtonElement;
+    immer.click();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("absender_extern_erlauben", { adresse: "bea@example.org" });
+  });
+
+  it("zeigt mit „Nur Text“ den Text statt des HTML", async () => {
+    const { wurzel } = await oeffnen();
+    const umschalter = wurzel.querySelector(".umschalter input") as HTMLInputElement;
+    umschalter.checked = true;
+    umschalter.dispatchEvent(new Event("change"));
+    expect(wurzel.querySelector("iframe")).toBeNull();
+    expect(wurzel.querySelector(".mailtext")?.textContent).toBe("Hallo Anna");
+    expect(wurzel.querySelector(".extern-leiste")).toBeNull();
+  });
+
+  it("listet Anhänge und speichert nur über „Speichern unter“", async () => {
+    const { wurzel } = await oeffnen({ anhang_speichern: "Rechnung.pdf" });
+    expect(wurzel.querySelector(".anhang-name")?.textContent).toBe("Rechnung.pdf");
+    const knopf = [...wurzel.querySelectorAll(".anhaenge button")].find(
+      (k) => k.textContent === "Speichern unter …",
+    ) as HTMLButtonElement;
+    knopf.click();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("anhang_speichern", { konto: "k1", ordner: "INBOX", uid: 5, index: 0 });
+    expect(wurzel.textContent).toContain("Gespeichert: Rechnung.pdf");
+  });
+
+  it("warnt vor Links mit abweichender Zieladresse und öffnet erst nach Bestätigung", async () => {
+    const { app } = await oeffnen({ link_oeffnen: undefined });
+    const klick = app.linkKlick({ href: "https://boese.example/login", text: "https://meine-bank.ch" });
+    await warten();
+    const dialog = document.querySelector("dialog.bestaetigen")!;
+    expect(dialog.textContent).toContain("verdächtiger Link");
+    expect(dialog.textContent).toContain("https://boese.example/login");
+    expect(invoke).not.toHaveBeenCalledWith("link_oeffnen", expect.anything());
+    ([...dialog.querySelectorAll("button")].find((k) => k.textContent === "Trotzdem öffnen") as HTMLButtonElement).click();
+    await klick;
+    expect(invoke).toHaveBeenCalledWith("link_oeffnen", { url: "https://boese.example/login" });
+  });
+
+  it("öffnet unverdächtige Links direkt im Standardbrowser", async () => {
+    const { app } = await oeffnen({ link_oeffnen: undefined });
+    await app.linkKlick({ href: "https://example.org/", text: "Zur Webseite" });
+    expect(document.querySelector("dialog.bestaetigen")).toBeNull();
+    expect(invoke).toHaveBeenCalledWith("link_oeffnen", { url: "https://example.org/" });
   });
 });

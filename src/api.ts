@@ -86,6 +86,36 @@ export type MailEreignis =
 
 export const MAIL_EREIGNIS = "mail-ereignis";
 
+export interface Adresse {
+  name: string | null;
+  adresse: string;
+}
+
+export interface Anhang {
+  index: number;
+  name: string;
+  typ: string;
+  groesse: number;
+}
+
+/** Vom Backend bereinigte Mail. */
+export interface AufbereiteteMail {
+  betreff: string;
+  von: Adresse[];
+  an: Adresse[];
+  cc: Adresse[];
+  antwort_an: Adresse[];
+  datum: number | null;
+  message_id: string | null;
+  referenzen: string[];
+  text: string;
+  /** Bereinigtes HTML (ohne Skripte, ohne externe Inhalte, sofern nicht erlaubt). */
+  html: string | null;
+  extern_blockiert: number;
+  extern_geladen: boolean;
+  anhaenge: Anhang[];
+}
+
 /** Macht aus einem Fehler des Backends einen lesbaren Text. */
 export function fehlertext(fehler: unknown): string {
   if (typeof fehler === "string") return fehler;
@@ -109,4 +139,10 @@ export const api = {
   mailLoeschen: (konto: string, ordner: string, uid: number) => invoke<void>("mail_loeschen", { konto, ordner, uid }),
   mailVerschieben: (konto: string, ordner: string, uid: number, ziel: string) =>
     invoke<void>("mail_verschieben", { konto, ordner, uid, ziel }),
+  mailAnzeigen: (konto: string, ordner: string, uid: number, externLaden: boolean) =>
+    invoke<AufbereiteteMail>("mail_anzeigen", { konto, ordner, uid, externLaden }),
+  absenderExternErlauben: (adresse: string) => invoke<void>("absender_extern_erlauben", { adresse }),
+  anhangSpeichern: (konto: string, ordner: string, uid: number, index: number) =>
+    invoke<string | null>("anhang_speichern", { konto, ordner, uid, index }),
+  linkOeffnen: (url: string) => invoke<void>("link_oeffnen", { url }),
 };

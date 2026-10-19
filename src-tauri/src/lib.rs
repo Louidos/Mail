@@ -6,7 +6,10 @@
 //! - `smtp`: Mails senden
 //! - `tls`: gemeinsame TLS-Regeln (nur rustls, mindestens TLS 1.2, Zertifikate immer geprüft)
 
+pub mod anzeige;
 pub mod befehle;
+pub mod dateien;
+pub mod einstellungen;
 pub mod fehler;
 pub mod imap;
 pub mod konto;
@@ -18,6 +21,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
 use befehle::AppZustand;
+use einstellungen::EinstellungsSpeicher;
 use imap::beobachter::{Beobachter, Melder};
 use imap::cache::SpeicherCache;
 use imap::dienst::ImapDienst;
@@ -31,6 +35,10 @@ pub const MAIL_EREIGNIS: &str = "mail-ereignis";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Dialog und Browser werden nur vom Backend aus verwendet; das Frontend hat
+        // dafür keine Rechte (siehe capabilities/default.json).
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let ordner = app.path().app_data_dir()?;
             std::fs::create_dir_all(&ordner)?;
@@ -66,6 +74,7 @@ pub fn run() {
                 imap,
                 beobachter,
                 melder,
+                einstellungen: Arc::new(EinstellungsSpeicher::neu(&ordner)),
             });
             Ok(())
         })
@@ -80,6 +89,10 @@ pub fn run() {
             befehle::mail_gelesen_setzen,
             befehle::mail_loeschen,
             befehle::mail_verschieben,
+            befehle::mail_anzeigen,
+            befehle::absender_extern_erlauben,
+            befehle::anhang_speichern,
+            befehle::link_oeffnen,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");

@@ -1,7 +1,6 @@
 //! Konfigurationsdatei `konten.json` (ohne Passwörter).
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -39,39 +38,19 @@ pub(super) fn laden(pfad: &Path) -> Result<Vec<Konto>, Fehlermeldung> {
     Ok(datei.konten)
 }
 
-/// Schreibt die Datei atomar (erst in eine temporäre Datei, dann umbenennen),
-/// unter Unix nur für den eigenen Benutzer lesbar.
+/// Schreibt die Datei atomar, unter Unix nur für den eigenen Benutzer lesbar.
 pub(super) fn speichern(pfad: &Path, konten: &[Konto]) -> Result<(), Fehlermeldung> {
-    let fehler = |_| {
-        Fehlermeldung::neu(
-            "datei",
-            "Die Kontoeinstellungen konnten nicht gespeichert werden.",
-        )
-    };
-    if let Some(ordner) = pfad.parent() {
-        fs::create_dir_all(ordner).map_err(fehler)?;
-    }
     let inhalt = serde_json::to_vec_pretty(&KontenDatei {
         version: VERSION,
         konten: konten.to_vec(),
     })
     .map_err(|_| Fehlermeldung::neu("datei", "Interner Fehler beim Speichern."))?;
-
-    let temp = pfad.with_extension("json.neu");
-    {
-        let mut optionen = fs::OpenOptions::new();
-        optionen.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            optionen.mode(0o600);
-        }
-        let mut datei = optionen.open(&temp).map_err(fehler)?;
-        datei.write_all(&inhalt).map_err(fehler)?;
-        datei.sync_all().map_err(fehler)?;
-    }
-    fs::rename(&temp, pfad).map_err(fehler)?;
-    Ok(())
+    crate::dateien::atomar_schreiben(pfad, &inhalt).map_err(|_| {
+        Fehlermeldung::neu(
+            "datei",
+            "Die Kontoeinstellungen konnten nicht gespeichert werden.",
+        )
+    })
 }
 
 #[cfg(test)]
