@@ -54,6 +54,30 @@ erneuert, musst du das neue hinterlegen.
 - **Löschen**: Entfernt das Konto aus SicherMail und das Passwort aus dem Schlüsselbund.
   Die Mails auf dem Server bleiben unverändert.
 
+## Mails empfangen
+
+- Links stehen unter jedem Konto seine **Ordner**. Der Posteingang wird nach dem Start automatisch geöffnet.
+- Die **Mailliste** zeigt Absender, Betreff und Datum, neueste zuerst. Ungelesene Mails sind fett.
+  Weitere Mails lädt **Ältere Mails laden**.
+- **Neue Mails kommen von selbst**: SicherMail hält pro Konto eine Verbindung zum Posteingang offen
+  (IMAP IDLE). Kann der Server kein IDLE, wird alle 2 Minuten nachgesehen.
+- Bricht die Verbindung ab, zeigt SicherMail unten einen Hinweis und verbindet automatisch neu
+  (Wartezeit 1 s, 2 s, 4 s … bis höchstens 5 Minuten). Danach wird abgeglichen, damit keine Mail fehlt
+  und keine doppelt erscheint.
+- Ist der Server nicht erreichbar, zeigt SicherMail die bereits geladenen Mails und einen Hinweis.
+
+### Mails bearbeiten
+
+Eine Mail anklicken öffnet sie rechts und markiert sie als gelesen. Darüber:
+
+- **Als ungelesen markieren** / **Als gelesen markieren**
+- **Verschieben nach …** in einen anderen Ordner
+- **Löschen**: verschiebt die Mail in den Papierkorb. Gibt es keinen Papierkorb oder liegt die Mail
+  schon darin, fragt SicherMail nach und löscht sie dann endgültig auf dem Server.
+
+Alle Änderungen werden sofort zum Server übertragen und gelten damit auch für andere Programme.
+SicherMail löscht nie von sich aus Mails auf dem Server.
+
 ## Wo liegen meine Daten?
 
 - Kontoeinstellungen ohne Passwort: `konten.json` im App-Datenordner

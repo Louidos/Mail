@@ -126,11 +126,13 @@ textarea {
 
 .layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 250px minmax(280px, 380px) 1fr;
+  grid-template-rows: 1fr auto;
   height: 100%;
 }
 
 .seitenleiste {
+  grid-row: 1;
   border-right: 1px solid var(--rand);
   background: var(--flaeche);
   padding: 1rem;
@@ -140,18 +142,40 @@ textarea {
   gap: 0.75rem;
 }
 
-.inhalt {
-  padding: 1.5rem;
-  overflow: auto;
+.mailliste {
+  grid-row: 1;
+  border-right: 1px solid var(--rand);
+  overflow-y: auto;
+  padding: 0.5rem;
 }
 
-ul.konten {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.lesebereich {
+  grid-row: 1;
+  overflow: auto;
+  padding: 1rem 1.5rem;
+  background: var(--flaeche);
+}
+
+.statusleiste {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.statusleiste:empty {
+  display: none;
+}
+
+.verbindung-getrennt {
+  background: var(--warnung-flaeche);
+  color: var(--warnung);
+  padding: 0.35rem 1rem;
+  font-size: 0.9rem;
+}
+
+nav.konten {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
 
 .konto {
@@ -170,10 +194,123 @@ ul.konten {
   font-size: 0.9rem;
 }
 
+.klein-text {
+  font-size: 0.85rem;
+}
+
 .konto-knoepfe {
   display: flex;
   gap: 0.4rem;
   margin-top: 0.4rem;
+}
+
+ul.ordner,
+ul.mails {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+.ordner-knopf {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.ordner-knopf.gewaehlt {
+  background: var(--flaeche-2);
+  font-weight: 600;
+}
+
+.ordner-knopf:disabled {
+  cursor: default;
+  color: var(--text-leise);
+  opacity: 1;
+}
+
+button.mail {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1rem 0.5rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--rand);
+  border-radius: 0;
+  background: none;
+  padding: 0.5rem;
+}
+
+button.mail.offen {
+  background: var(--flaeche-2);
+}
+
+button.mail.ungelesen .mail-absender,
+button.mail.ungelesen .mail-betreff {
+  font-weight: 700;
+}
+
+.mail-absender,
+.mail-betreff {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-betreff {
+  grid-column: 1 / -1;
+  color: var(--text-leise);
+}
+
+.mail-datum {
+  color: var(--text-leise);
+  font-size: 0.85rem;
+}
+
+.hinweis-leiste {
+  background: var(--warnung-flaeche);
+  color: var(--warnung);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.lesen .werkzeuge {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.lesen select.klein {
+  width: auto;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85rem;
+}
+
+.lesen .betreff {
+  font-size: 1.3rem;
+  overflow-wrap: anywhere;
+}
+
+dl.kopfdaten {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 1rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+dl.kopfdaten dt {
+  color: var(--text-leise);
+}
+
+dl.kopfdaten dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .willkommen {
