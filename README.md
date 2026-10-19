@@ -79,10 +79,14 @@ Getestet wird nie gegen echte Postfächer.
 | `src-tauri/` | Rust-Backend (Tauri 2)                                           |
 | `public/`    | statische Dateien (Icons)                                        |
 | `tests/`     | Frontend-Tests und Integrationstests gegen einen Test-Mailserver |
-| `docs/`      | Doku: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md) |
+| `docs/`      | Doku: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Sicherheit](docs/sicherheit.md) |
 | `scripts/`   | Hilfsskripte                                                     |
 
 ## Sicherheit
+
+Wie SicherMail Zugangsdaten, Inhalte und Privatsphäre schützt – und was bewusst nicht abgedeckt ist –, steht im
+[Sicherheitskonzept](docs/sicherheit.md). Abhängigkeiten werden in der CI mit `cargo audit` und `npm audit`
+auf bekannte Lücken geprüft.
 
 Sicherheitslücken bitte nicht öffentlich melden, sondern wie in [SECURITY.md](SECURITY.md) beschrieben.
 

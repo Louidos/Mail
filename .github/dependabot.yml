@@ -1,0 +1,37 @@
+# Automatische Aktualisierungen für Abhängigkeiten (Sicherheits- und Versionsupdates).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+    labels: ["abhängigkeiten", "rust"]
+    groups:
+      tauri:
+        patterns: ["tauri*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+    labels: ["abhängigkeiten", "javascript"]
+    groups:
+      entwicklung:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore"
+    labels: ["abhängigkeiten", "ci"]
