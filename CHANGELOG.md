@@ -15,3 +15,4 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 - Sichere Mailanzeige: Skripte und Formulare werden entfernt, externe Inhalte sind blockiert (auf Wunsch pro Mail oder pro Absender ladbar), Warnung bei Links mit abweichender Zieladresse, Anhänge nur über „Speichern unter“, Umschalter „Nur Text anzeigen“ (#4)
 - Mails ohne Internet lesbar: lokal in einer verschlüsselten Datenbank gespeichert (Schlüssel nur im Schlüsselbund), Einstellung „Mails lokal speichern“ und Knopf „Lokalen Speicher leeren“ (#5)
 - Mails schreiben, antworten, allen antworten und weiterleiten (mit Zitat und Anhängen), verschlüsselt über SMTP senden; gesendete Mails landen im Ordner „Gesendet“, bei Fehlern bleibt die Mail als Entwurf erhalten (#6)
+- Automatische Prüfung auf bekannte Sicherheitslücken in Abhängigkeiten und dokumentiertes Sicherheitskonzept (#7)

@@ -18,6 +18,13 @@ und veröffentlichen eine Korrektur als neue PATCH-Version. Auf Wunsch wirst du 
 
 ## Grundregeln von SicherMail
 
+Ausführlich im [Sicherheitskonzept](docs/sicherheit.md).
+
 - Nur verschlüsselte Verbindungen (TLS oder STARTTLS), Zertifikate werden immer geprüft.
 - Passwörter nur im Schlüsselbund des Betriebssystems.
 - Keine Telemetrie, keine Verbindungen ausser zu den vom Nutzer angegebenen Servern.
+
+## Automatische Prüfungen
+
+- `cargo audit` und `npm audit --audit-level=high` laufen in der CI bei jedem Push, jedem Pull Request und wöchentlich.
+- Dependabot schlägt Updates für Cargo, npm und GitHub Actions vor.
