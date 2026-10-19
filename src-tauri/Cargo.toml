@@ -1,6 +1,6 @@
 [package]
 name = "sichermail"
-version = "0.2.0"
+version = "0.2.1"
 description = "SicherMail – sicherer Open-Source-Mailclient für den Desktop"
 authors = ["SicherMail-Mitwirkende"]
 license = "GPL-3.0-or-later"
