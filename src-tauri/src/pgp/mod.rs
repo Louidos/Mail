@@ -3,12 +3,14 @@
 //! - `schluessel`: Schlüssel erzeugen, einlesen, prüfen, beschreiben
 //! - `speicher`: verschlüsselter Schlüsselspeicher (`schluessel.db`, SQLCipher)
 //! - `lesen`: verschlüsselte und signierte Mails erkennen, entschlüsseln und prüfen
+//! - `schreiben`: Mails verschlüsseln und signieren
 //!
 //! Passphrasen werden nie gespeichert, sondern nach dem Entsperren höchstens bis zum
 //! Programmende im Arbeitsspeicher gehalten (`Zeroizing`).
 
 pub mod lesen;
 pub mod schluessel;
+pub mod schreiben;
 pub mod speicher;
 
 use std::collections::HashMap;
@@ -35,6 +37,27 @@ pub struct EigenerSchluessel {
     pub geschuetzt: bool,
     /// Ist die Passphrase in dieser Sitzung bereits eingegeben (oder nicht nötig)?
     pub entsperrt: bool,
+}
+
+/// Ergebnis der Prüfung vor dem Senden (für die Oberfläche).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct VersandPruefung {
+    /// Empfänger ohne (verwendbaren) öffentlichen Schlüssel.
+    pub fehlende_empfaenger: Vec<String>,
+    /// Das Konto hat keinen eigenen Schlüssel.
+    pub eigener_fehlt: bool,
+    /// Fingerabdruck (Anzeige) des eigenen Schlüssels, dessen Passphrase zum Signieren fehlt.
+    pub passphrase_fuer: Option<String>,
+}
+
+/// Schlüssel für den Versand einer Mail.
+pub struct VersandSchluessel {
+    /// Öffentlicher Schlüssel je Empfängeradresse (kleingeschrieben); nur beim Verschlüsseln.
+    pub empfaenger: Option<HashMap<String, SignedPublicKey>>,
+    /// Eigener öffentlicher Schlüssel (es wird immer auch an ihn verschlüsselt).
+    pub eigener: SignedPublicKey,
+    /// Zum Signieren (eigener Schlüssel mit Passphrase).
+    pub signierer: Option<schreiben::Signierer>,
 }
 
 /// Alle Schlüssel für die Oberfläche (ohne geheime Teile).
@@ -257,6 +280,135 @@ impl PgpDienst {
             .map_err(|_| fehler("Interner Fehler."))?
             .insert(gesucht, Zeroizing::new(passphrase.to_string()));
         Ok(())
+    }
+
+    /// Neuester verwendbarer öffentlicher Schlüssel für eine Adresse (importiert oder eigener).
+    fn schluessel_fuer<'a>(
+        alle: &'a [SignedPublicKey],
+        adresse: &str,
+    ) -> Option<&'a SignedPublicKey> {
+        alle.iter()
+            .filter(|s| {
+                schluessel::passt_zu_adresse(s, adresse) && schreiben::kann_verschluesseln(s)
+            })
+            .max_by_key(|s| {
+                use pgp::types::KeyDetails;
+                s.primary_key.created_at().as_secs()
+            })
+    }
+
+    /// Prüft, ob mit diesen Einstellungen gesendet werden kann (ohne etwas zu verändern).
+    pub fn versand_pruefen(
+        &self,
+        konto: &str,
+        adressen: &[String],
+        verschluesseln: bool,
+        signieren: bool,
+    ) -> Result<VersandPruefung, Fehlermeldung> {
+        let mut pruefung = VersandPruefung::default();
+        if !verschluesseln && !signieren {
+            return Ok(pruefung);
+        }
+        let eigene = self.eigene()?;
+        match eigene.iter().find(|(k, _)| k == konto) {
+            None => pruefung.eigener_fehlt = true,
+            Some((_, geheim)) => {
+                if signieren && !self.entsperrt(geheim) {
+                    pruefung.passphrase_fuer = Some(schluessel::fingerabdruck_anzeige(
+                        &schluessel::fingerabdruck_hex(&geheim.primary_key),
+                    ));
+                }
+            }
+        }
+        if verschluesseln {
+            let alle: Vec<SignedPublicKey> = eigene
+                .iter()
+                .map(|(_, s)| s.to_public_key())
+                .chain(self.fremde()?)
+                .collect();
+            for adresse in adressen {
+                let adresse = adresse.trim().to_lowercase();
+                if Self::schluessel_fuer(&alle, &adresse).is_none()
+                    && !pruefung.fehlende_empfaenger.contains(&adresse)
+                {
+                    pruefung.fehlende_empfaenger.push(adresse);
+                }
+            }
+        }
+        Ok(pruefung)
+    }
+
+    /// Stellt die Schlüssel für den Versand zusammen. Fehlt etwas, wird nicht gesendet:
+    /// SicherMail sendet nie unbemerkt unverschlüsselt.
+    pub fn versand_vorbereiten(
+        &self,
+        konto: &str,
+        adressen: &[String],
+        verschluesseln: bool,
+        signieren: bool,
+    ) -> Result<VersandSchluessel, Fehlermeldung> {
+        let pruefung = self.versand_pruefen(konto, adressen, verschluesseln, signieren)?;
+        if pruefung.eigener_fehlt {
+            return Err(Fehlermeldung::neu(
+                "pgp_kein_eigener",
+                "Für dieses Konto gibt es keinen eigenen OpenPGP-Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel (OpenPGP)“.",
+            ));
+        }
+        if !pruefung.fehlende_empfaenger.is_empty() {
+            return Err(Fehlermeldung::neu(
+                "pgp_schluessel_fehlt",
+                format!(
+                    "Für diese Empfänger fehlt ein öffentlicher Schlüssel: {}. SicherMail sendet nie unbemerkt unverschlüsselt – importiere die Schlüssel oder schalte „Verschlüsseln“ aus.",
+                    pruefung.fehlende_empfaenger.join(", ")
+                ),
+            ));
+        }
+        if pruefung.passphrase_fuer.is_some() {
+            return Err(Fehlermeldung::neu(
+                "pgp_passphrase",
+                "Zum Signieren wird die Passphrase deines Schlüssels benötigt.",
+            ));
+        }
+        let eigene = self.eigene()?;
+        let (_, geheim) = eigene
+            .into_iter()
+            .find(|(k, _)| k == konto)
+            .ok_or_else(|| fehler("Kein eigener Schlüssel."))?;
+        let eigener = geheim.to_public_key();
+        let empfaenger = if verschluesseln {
+            let alle: Vec<SignedPublicKey> = std::iter::once(eigener.clone())
+                .chain(self.fremde()?)
+                .collect();
+            let mut zuordnung = HashMap::new();
+            for adresse in adressen {
+                let adresse = adresse.trim().to_lowercase();
+                let schluessel = Self::schluessel_fuer(&alle, &adresse)
+                    .ok_or_else(|| fehler("Ein Empfängerschlüssel fehlt."))?;
+                zuordnung.insert(adresse, schluessel.clone());
+            }
+            Some(zuordnung)
+        } else {
+            None
+        };
+        let signierer = if signieren {
+            let passphrase = if schluessel::geschuetzt(&geheim) {
+                self.passphrase(&schluessel::fingerabdruck_hex(&geheim.primary_key))
+                    .ok_or_else(|| fehler("Die Passphrase fehlt."))?
+            } else {
+                Zeroizing::new(String::new())
+            };
+            Some(schreiben::Signierer {
+                schluessel: geheim,
+                passphrase,
+            })
+        } else {
+            None
+        };
+        Ok(VersandSchluessel {
+            empfaenger,
+            eigener,
+            signierer,
+        })
     }
 
     /// Alle Schlüssel zum Entschlüsseln und Prüfen.

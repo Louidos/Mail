@@ -24,7 +24,7 @@ use crate::konto::schluesselbund::Schluesselbund;
 use crate::konto::{Konto, KontoEingabe, KontoVerwaltung, Pruefergebnis};
 use crate::pgp::lesen::{Verarbeitet, Verschluesselung};
 use crate::pgp::schluessel::SchluesselInfo;
-use crate::pgp::{PgpDienst, Uebersicht};
+use crate::pgp::{PgpDienst, Uebersicht, VersandPruefung};
 use crate::smtp::anhaenge::{AnhangAuswahl, Eintrag, Quelle};
 use crate::smtp::dienst::{SendeDienst, SendeErgebnis};
 use crate::smtp::entwurf::Entwurf;
@@ -700,6 +700,26 @@ pub async fn pgp_loeschen(
 ) -> Result<(), Fehlermeldung> {
     let pgp = zustand.pgp.clone();
     blockierend(move || pgp.loeschen(&fingerabdruck)).await
+}
+
+/// Prüft vor dem Senden, ob für „Verschlüsseln“ bzw. „Signieren“ alles da ist: Schlüssel aller
+/// Empfänger (An, Cc, Bcc), eigener Schlüssel und – zum Signieren – die Passphrase.
+#[tauri::command]
+pub async fn pgp_versand_pruefen(
+    zustand: State<'_, AppZustand>,
+    entwurf: Entwurf,
+) -> Result<VersandPruefung, Fehlermeldung> {
+    let adressen = crate::smtp::nachricht::alle_empfaenger(&entwurf)?;
+    let pgp = zustand.pgp.clone();
+    blockierend(move || {
+        pgp.versand_pruefen(
+            &entwurf.konto,
+            &adressen,
+            entwurf.verschluesseln,
+            entwurf.signieren,
+        )
+    })
+    .await
 }
 
 /// Entsperrt einen eigenen Schlüssel bis zum Programmende (Passphrase nur im Arbeitsspeicher).

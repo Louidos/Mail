@@ -4,7 +4,25 @@ import { datumLang } from "../postfach/format";
 
 /** Leerer Entwurf für ein Konto. */
 export function leererEntwurf(konto: string): Entwurf {
-  return { id: null, konto, an: "", cc: "", bcc: "", betreff: "", text: "", html: false, referenzen: [], anhaenge: [] };
+  return {
+    id: null,
+    konto,
+    an: "",
+    cc: "",
+    bcc: "",
+    betreff: "",
+    text: "",
+    html: false,
+    referenzen: [],
+    anhaenge: [],
+    verschluesseln: false,
+    signieren: false,
+  };
+}
+
+/** War die Mail verschlüsselt? Dann sind Antwort und Weiterleitung es standardmässig auch. */
+function warVerschluesselt(mail: AufbereiteteMail): boolean {
+  return (mail.pgp?.verschluesselung ?? "keine") !== "keine";
 }
 
 /** Adresse für ein Empfängerfeld; Namen mit Sonderzeichen in Anführungszeichen. */
@@ -54,6 +72,8 @@ export function antwortEntwurf(mail: AufbereiteteMail, konto: Konto, allen: bool
     text: `\n\n${zitieren(mail)}`,
     antwort_auf: mail.message_id,
     referenzen: [...mail.referenzen],
+    verschluesseln: warVerschluesselt(mail),
+    signieren: warVerschluesselt(mail),
   };
 }
 
@@ -71,6 +91,8 @@ export function weiterleitenEntwurf(mail: AufbereiteteMail, konto: Konto): Entwu
     ...leererEntwurf(konto.id),
     betreff: betreffMitVorsilbe(mail.betreff, "Fwd"),
     text: `\n\n${kopf.join("\n")}\n\n${mail.text}`,
+    verschluesseln: warVerschluesselt(mail),
+    signieren: warVerschluesselt(mail),
   };
 }
 

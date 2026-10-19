@@ -252,3 +252,173 @@ async fn verschluesselte_mail_liegt_nur_verschluesselt_im_lokalen_speicher() {
     assert!(text.contains("-----BEGIN PGP MESSAGE-----"));
     assert!(!text.contains("das ist geheim"));
 }
+
+/// Alle Mails (roh) eines Ordners, direkt vom Server.
+async fn mails_im_ordner(adresse: &str, ordner: &str) -> Vec<Vec<u8>> {
+    use futures_util::TryStreamExt;
+    let mut s = direkte_sitzung(adresse).await;
+    s.examine(ordner).await.unwrap();
+    let antworten: Vec<async_imap::types::Fetch> = s
+        .fetch("1:*", "(BODY.PEEK[])")
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    let _ = s.logout().await;
+    antworten
+        .iter()
+        .map(|f| f.body().unwrap_or_default().to_vec())
+        .collect()
+}
+
+/// Ein Empfänger mit eigenem Schlüssel und Beas … bzw. dem Schlüssel des Absenders.
+struct Teilnehmer {
+    adresse: String,
+    _ordner: tempfile::TempDir,
+    pgp: PgpDienst,
+}
+
+async fn teilnehmer() -> Teilnehmer {
+    let adresse = neue_adresse();
+    zustellen(&adresse, &["Willkommen"]).await;
+    let ordner = tempfile::tempdir().unwrap();
+    let pgp = PgpDienst::neu(ordner.path(), Arc::new(SpeicherSchluesselbund::default()));
+    let info = pgp
+        .erzeugen("eigen", "Teilnehmer", &adresse, PASSPHRASE)
+        .unwrap();
+    pgp.entsperren(&info.fingerabdruck, PASSPHRASE).unwrap();
+    Teilnehmer {
+        adresse,
+        _ordner: ordner,
+        pgp,
+    }
+}
+
+fn austauschen(von: &PgpDienst, an: &PgpDienst) {
+    let info = &von.uebersicht().unwrap().eigene[0];
+    let (_, oeffentlich) = von.exportieren(&info.info.fingerabdruck).unwrap();
+    an.oeffentliche_importieren(oeffentlich.as_bytes()).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "braucht den Test-Mailserver (scripts/test-mailserver.sh start)"]
+async fn verschluesselt_senden_kommt_verschluesselt_an_und_liegt_lesbar_in_gesendet() {
+    use sichermail_lib::imap::cache::SpeicherCache;
+    use sichermail_lib::smtp::dienst::SendeDienst;
+    use sichermail_lib::smtp::entwurf::Entwurf;
+
+    let empfaenger = teilnehmer().await;
+    let bcc = teilnehmer().await;
+    let ohne_schluessel = neue_adresse();
+    zustellen(&ohne_schluessel, &["Willkommen"]).await;
+
+    // Absender mit eigenem Konto und Schlüssel
+    let absender = neue_adresse();
+    zustellen(&absender, &["Willkommen"]).await;
+    let (_ordner, konten, konto) = konto_mit_ports(&absender, IMAP_TLS, SMTP_TLS).await;
+    let pgp_ordner = tempfile::tempdir().unwrap();
+    let pgp = Arc::new(PgpDienst::neu(
+        pgp_ordner.path(),
+        Arc::new(SpeicherSchluesselbund::default()),
+    ));
+    let eigener = pgp
+        .erzeugen(&konto.id, &konto.name, &konto.email, PASSPHRASE)
+        .unwrap();
+    austauschen(&empfaenger.pgp, &pgp);
+    austauschen(&bcc.pgp, &pgp);
+    austauschen(&pgp, &empfaenger.pgp);
+    austauschen(&pgp, &bcc.pgp);
+
+    let imap = Arc::new(ImapDienst::neu(
+        konten.clone(),
+        Arc::new(SpeicherCache::default()),
+    ));
+    let dienst = SendeDienst::neu(konten, imap).mit_pgp(pgp.clone());
+    let dateien = tempfile::tempdir().unwrap();
+    let pfad = dateien.path().join("Vertrag.pdf");
+    std::fs::write(&pfad, b"%PDF-1.4 vertraulich").unwrap();
+    let anhang = dienst.register.datei_eintragen(pfad).unwrap();
+    let entwurf = Entwurf {
+        konto: konto.id.clone(),
+        an: format!("Empfänger <{}>", empfaenger.adresse),
+        bcc: bcc.adresse.clone(),
+        betreff: "Vertraulich".into(),
+        text: "Streng geheimer Inhalt.\n".into(),
+        anhaenge: vec![anhang],
+        verschluesseln: true,
+        signieren: true,
+        ..Default::default()
+    };
+
+    // Signieren ohne entsperrten Schlüssel: nicht gesendet.
+    let fehler = dienst.senden(&entwurf).await.unwrap_err();
+    assert_eq!(fehler.art, "pgp_passphrase");
+    pgp.entsperren(&eigener.fingerabdruck, PASSPHRASE).unwrap();
+
+    // Ein Empfänger ohne Schlüssel: nicht gesendet, klar benannt.
+    let mut ohne = entwurf.clone();
+    ohne.cc = ohne_schluessel.clone();
+    let fehler = dienst.senden(&ohne).await.unwrap_err();
+    assert_eq!(fehler.art, "pgp_schluessel_fehlt");
+    assert!(
+        fehler.meldung.contains(&ohne_schluessel),
+        "{}",
+        fehler.meldung
+    );
+    assert_eq!(mails_im_ordner(&ohne_schluessel, "INBOX").await.len(), 1);
+    assert_eq!(mails_im_ordner(&empfaenger.adresse, "INBOX").await.len(), 1);
+
+    // Jetzt mit allen Schlüsseln
+    let ergebnis = dienst.senden(&entwurf).await.unwrap();
+    assert!(ergebnis.abgelegt, "{ergebnis:?}");
+
+    // Beim Empfänger: verschlüsselt angekommen, ohne Bcc, lesbar und gültig signiert.
+    let posteingang = mails_im_ordner(&empfaenger.adresse, "INBOX").await;
+    assert_eq!(posteingang.len(), 2);
+    let roh = &posteingang[1];
+    let text = String::from_utf8_lossy(roh);
+    assert!(text.contains("multipart/encrypted"));
+    assert!(!text.contains("Streng geheimer Inhalt"));
+    assert!(!text.contains("Vertrag.pdf"));
+    assert!(!text.contains(&bcc.adresse));
+    let ergebnis = empfaenger.pgp.verarbeiten(roh);
+    assert_eq!(
+        ergebnis.status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+    assert_eq!(ergebnis.status.signatur, Signatur::Gueltig);
+    let lesbar = anzeige::aufbereiten(&ergebnis.roh.unwrap(), None).unwrap();
+    assert!(lesbar.text.contains("Streng geheimer Inhalt."));
+    assert_eq!(lesbar.anhaenge[0].name, "Vertrag.pdf");
+
+    // Bcc: eigene, nur für ihn verschlüsselte Nachricht.
+    let bcc_eingang = mails_im_ordner(&bcc.adresse, "INBOX").await;
+    assert_eq!(bcc_eingang.len(), 2);
+    assert_eq!(
+        bcc.pgp.verarbeiten(&bcc_eingang[1]).status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+    assert_eq!(
+        empfaenger
+            .pgp
+            .verarbeiten(&bcc_eingang[1])
+            .status
+            .verschluesselung,
+        Verschluesselung::NichtEntschluesselt
+    );
+
+    // „Gesendet“: verschlüsselt abgelegt, mit dem eigenen Schlüssel lesbar.
+    let gesendet = mails_im_ordner(&absender, "Sent").await;
+    assert_eq!(gesendet.len(), 1);
+    assert!(!String::from_utf8_lossy(&gesendet[0]).contains("Streng geheimer Inhalt"));
+    let eigen = pgp.verarbeiten(&gesendet[0]);
+    assert_eq!(
+        eigen.status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+    assert!(anzeige::aufbereiten(&eigen.roh.unwrap(), None)
+        .unwrap()
+        .text
+        .contains("Streng geheimer Inhalt."));
+}

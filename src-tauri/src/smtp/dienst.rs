@@ -13,7 +13,7 @@ use crate::fehler::{Fehlermeldung, VerbindungsFehler};
 use crate::imap::dienst::ImapDienst;
 use crate::konto::KontoVerwaltung;
 use crate::pgp::lesen::Verschluesselung;
-use crate::pgp::PgpDienst;
+use crate::pgp::{PgpDienst, VersandSchluessel};
 use crate::tls::VERBINDUNGS_ZEITLIMIT;
 
 /// Ergebnis eines erfolgreichen Versands.
@@ -96,6 +96,33 @@ impl SendeDienst {
         }
     }
 
+    /// Bei „Verschlüsseln“ oder „Signieren“: Schlüssel zusammenstellen oder mit klarer Meldung
+    /// abbrechen.
+    async fn pgp_vorbereiten(
+        &self,
+        entwurf: &Entwurf,
+    ) -> Result<Option<VersandSchluessel>, Fehlermeldung> {
+        if !entwurf.verschluesseln && !entwurf.signieren {
+            return Ok(None);
+        }
+        let pgp = self
+            .pgp
+            .clone()
+            .ok_or_else(|| Fehlermeldung::neu("pgp", "OpenPGP ist nicht verfügbar."))?;
+        let adressen = nachricht::alle_empfaenger(entwurf)?;
+        let (konto, verschluesseln, signieren) = (
+            entwurf.konto.clone(),
+            entwurf.verschluesseln,
+            entwurf.signieren,
+        );
+        tokio::task::spawn_blocking(move || {
+            pgp.versand_vorbereiten(&konto, &adressen, verschluesseln, signieren)
+        })
+        .await
+        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei OpenPGP."))?
+        .map(Some)
+    }
+
     async fn anhaenge_laden(&self, entwurf: &Entwurf) -> Result<Vec<AnhangDaten>, Fehlermeldung> {
         let zu_gross = || {
             Fehlermeldung::neu(
@@ -150,24 +177,52 @@ impl SendeDienst {
         entwurf: &Entwurf,
     ) -> Result<SendeErgebnis, Fehlermeldung> {
         let konto = self.konten.finden(&entwurf.konto).await?;
+        // Schlüssel zuerst: Fehlt etwas, wird gar nichts gesendet (nie unbemerkt unverschlüsselt).
+        let schluessel = self.pgp_vorbereiten(entwurf).await?;
         let anhaenge = self.anhaenge_laden(entwurf).await?;
-        let nachricht = nachricht::bauen(&konto, entwurf, anhaenge)?;
+        let nachricht = {
+            let (konto, entwurf) = (konto.clone(), entwurf.clone());
+            // Verschlüsseln und Schlüsselableitung brauchen Rechenzeit.
+            tokio::task::spawn_blocking(move || {
+                nachricht::bauen_mit(&konto, &entwurf, &anhaenge, schluessel.as_ref())
+            })
+            .await
+            .map_err(|_| {
+                Fehlermeldung::neu("intern", "Interner Fehler beim Erstellen der Mail.")
+            })??
+        };
 
         let passwort = self.konten.passwort(&konto.id)?;
         let mut verbindung = super::anmelden(&konto.smtp, &konto.benutzername, &passwort).await?;
         drop(passwort);
-        let versand = verbindung.send(&nachricht.umschlag, &nachricht.zum_senden);
-        match timeout(VERBINDUNGS_ZEITLIMIT * 6, versand).await {
-            Err(_) => return Err(VerbindungsFehler::Zeitueberschreitung.into()),
-            Ok(Err(fehler)) => {
-                let meldung = if fehler.is_permanent() {
-                    "Der SMTP-Server hat die Mail abgelehnt. Bitte Empfänger und Anhänge prüfen."
-                } else {
-                    "Die Mail konnte nicht an den SMTP-Server übergeben werden. Bitte später erneut versuchen."
-                };
-                return Err(Fehlermeldung::neu("senden", meldung));
+        for (nr, sendung) in nachricht.sendungen.iter().enumerate() {
+            let versand = verbindung.send(&sendung.umschlag, &sendung.daten);
+            let fehler = match timeout(VERBINDUNGS_ZEITLIMIT * 6, versand).await {
+                Err(_) => Some(Fehlermeldung::from(VerbindungsFehler::Zeitueberschreitung)),
+                Ok(Err(fehler)) => Some(Fehlermeldung::neu(
+                    "senden",
+                    if fehler.is_permanent() {
+                        "Der SMTP-Server hat die Mail abgelehnt. Bitte Empfänger und Anhänge prüfen."
+                    } else {
+                        "Die Mail konnte nicht an den SMTP-Server übergeben werden. Bitte später erneut versuchen."
+                    },
+                )),
+                Ok(Ok(_)) => None,
+            };
+            if let Some(mut fehler) = fehler {
+                if nr > 0 {
+                    let fehlend: Vec<String> = nachricht.sendungen[nr..]
+                        .iter()
+                        .flat_map(|s| s.umschlag.to().iter().map(|a| a.to_string()))
+                        .collect();
+                    fehler.meldung = format!(
+                        "{} Die Mail ging bereits an einen Teil der Empfänger, nicht aber an: {}.",
+                        fehler.meldung,
+                        fehlend.join(", ")
+                    );
+                }
+                return Err(fehler);
             }
-            Ok(Ok(_)) => {}
         }
         let _ = verbindung.quit().await;
 

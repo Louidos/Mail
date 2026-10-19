@@ -70,7 +70,7 @@ pub fn adresse_aus_user_id(user_id: &str) -> Option<String> {
     };
     let kandidat = kandidat.trim();
     let (lokal, domain) = kandidat.rsplit_once('@')?;
-    (!lokal.is_empty() && domain.contains('.') && !kandidat.contains(char::is_whitespace))
+    (!lokal.is_empty() && !domain.is_empty() && !kandidat.contains(char::is_whitespace))
         .then(|| kandidat.to_lowercase())
 }
 

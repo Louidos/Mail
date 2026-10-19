@@ -47,7 +47,12 @@ export async function entwuerfeOeffnen(konto: Konto, oeffnen: (entwurf: Entwurf)
           return el(
             "li",
             {},
-            el("span", { class: "entwurf-betreff" }, entwurf.betreff || "(kein Betreff)"),
+            el(
+              "span",
+              { class: "entwurf-betreff" },
+              entwurf.verschluesseln ? "🔒 " : "",
+              entwurf.betreff || "(kein Betreff)",
+            ),
             el("span", { class: "leise" }, entwurf.an ? `an ${entwurf.an}` : "ohne Empfänger"),
             el("span", { class: "knoepfe-inline" }, auf, weg),
           );

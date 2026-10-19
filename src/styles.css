@@ -930,3 +930,26 @@ ul.schluessel-liste li {
   gap: var(--abstand-2);
 }
 
+/* Schreibfenster: OpenPGP-Schalter und Hinweis */
+.pgp-schalter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--abstand-4);
+  margin: var(--abstand-2) 0;
+}
+
+.pgp-hinweis {
+  margin: 0 0 var(--abstand-2);
+  font-size: var(--groesse-klein);
+  color: var(--text-leise);
+}
+
+.pgp-hinweis[data-art="fehler"] {
+  color: var(--fehler-dunkel);
+  font-weight: 600;
+}
+
+dialog.passphrase input {
+  width: 100%;
+}
+

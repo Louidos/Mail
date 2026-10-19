@@ -55,3 +55,58 @@ export function bestaetigen(optionen: BestaetigenOptionen): Promise<boolean> {
     nein.focus();
   });
 }
+
+export interface PassphraseOptionen {
+  titel: string;
+  text: string;
+  /** Beschriftung des Knopfs, der bestätigt. */
+  ja: string;
+}
+
+/**
+ * Fragt nach einer Passphrase. Ergebnis `null` bei Abbruch. Die Eingabe wird danach aus dem
+ * Feld gelöscht und nirgends gespeichert.
+ */
+export function passphraseAbfragen(optionen: PassphraseOptionen): Promise<string | null> {
+  return new Promise((erledigt) => {
+    const feld = el("input", {
+      type: "password",
+      name: "passphrase",
+      autocomplete: "off",
+      "aria-label": "Passphrase",
+      placeholder: "Passphrase",
+    });
+    const ja = el("button", { type: "submit", class: "haupt" }, optionen.ja);
+    const nein = el("button", { type: "button" }, "Abbrechen");
+    const formular = el(
+      "form",
+      { method: "dialog" },
+      el("h2", {}, optionen.titel),
+      el("p", { class: "vorformatiert" }, optionen.text),
+      feld,
+      el(
+        "p",
+        { class: "leise" },
+        "Die Passphrase wird nicht gespeichert, sondern nur bis zum Beenden von SicherMail im Arbeitsspeicher gehalten.",
+      ),
+      el("div", { class: "knoepfe" }, nein, ja),
+    );
+    const dialog = el("dialog", { class: "bestaetigen passphrase" }, formular);
+    const ende = (ergebnis: string | null) => {
+      feld.value = "";
+      modalSchliessen(dialog);
+      erledigt(ergebnis);
+    };
+    formular.addEventListener("submit", (ereignis) => {
+      ereignis.preventDefault();
+      if (feld.value) ende(feld.value);
+    });
+    nein.addEventListener("click", () => ende(null));
+    dialog.addEventListener("cancel", (ereignis) => {
+      ereignis.preventDefault();
+      ende(null);
+    });
+    modalZeigen(dialog);
+    feld.focus();
+  });
+}

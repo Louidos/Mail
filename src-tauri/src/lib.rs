@@ -129,6 +129,7 @@ pub fn run() {
             befehle::pgp_exportieren,
             befehle::pgp_loeschen,
             befehle::pgp_entsperren,
+            befehle::pgp_versand_pruefen,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");

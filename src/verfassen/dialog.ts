@@ -1,6 +1,6 @@
 /** Fenster „Mail verfassen“: neue Mail, Antwort, Weiterleitung oder geöffneter Entwurf. */
-import { api, fehlertext, type Entwurf, type Konto, type SendeErgebnis } from "../api";
-import { bestaetigen, modalSchliessen, modalZeigen } from "../dialoge";
+import { api, fehlertext, type Entwurf, type Konto, type SendeErgebnis, type VersandPruefung } from "../api";
+import { bestaetigen, modalSchliessen, modalZeigen, passphraseAbfragen } from "../dialoge";
 import { el } from "../dom";
 import { groesse } from "../postfach/format";
 import { empfaengerFehlen } from "./zitat";
@@ -12,6 +12,20 @@ export interface VerfassenOptionen {
   gesendet?: (ergebnis: SendeErgebnis) => void;
   /** Nachdem Entwürfe gespeichert oder gelöscht wurden. */
   entwuerfeGeaendert?: () => void;
+}
+
+/**
+ * Meldung, warum mit OpenPGP (noch) nicht gesendet werden kann, oder `null`. Die Passphrase
+ * ist kein Hindernis: Nach ihr wird beim Senden gefragt.
+ */
+export function versandHindernis(pruefung: VersandPruefung, verschluesseln: boolean): string | null {
+  if (pruefung.eigener_fehlt) {
+    return "Für dieses Konto gibt es noch keinen eigenen Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel (OpenPGP)“.";
+  }
+  if (verschluesseln && pruefung.fehlende_empfaenger.length > 0) {
+    return `Für diese Empfänger fehlt ein öffentlicher Schlüssel: ${pruefung.fehlende_empfaenger.join(", ")}. Ohne Schlüssel wird nicht gesendet – importiere ihn oder schalte „Verschlüsseln“ aus.`;
+  }
+  return null;
 }
 
 function feld(beschriftung: string, eingabe: HTMLElement): HTMLLabelElement {
@@ -36,6 +50,9 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
   const text = el("textarea", { name: "text", rows: "16", spellcheck: "true" });
   text.value = entwurf.text;
   const html = el("input", { type: "checkbox", name: "html", checked: entwurf.html });
+  const verschluesseln = el("input", { type: "checkbox", name: "verschluesseln", checked: !!entwurf.verschluesseln });
+  const signieren = el("input", { type: "checkbox", name: "signieren", checked: !!entwurf.signieren });
+  const pgpHinweis = el("p", { class: "pgp-hinweis", role: "status", "aria-live": "polite" });
   const anhangListe = el("ul", { class: "anhaenge" });
   const status = el("p", { class: "status", role: "status", "aria-live": "polite" });
 
@@ -54,6 +71,13 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
     feld("Betreff", betreff),
     feld("Text", text),
     el("label", { class: "umschalter" }, html, "Zusätzlich als einfaches HTML senden"),
+    el(
+      "div",
+      { class: "pgp-schalter" },
+      el("label", { class: "umschalter" }, verschluesseln, "Verschlüsseln (OpenPGP)"),
+      el("label", { class: "umschalter" }, signieren, "Signieren (OpenPGP)"),
+    ),
+    pgpHinweis,
     el("div", { class: "anhang-bereich" }, el("h3", {}, "Anhänge"), anhangListe, anhaengen),
     status,
     el("div", { class: "knoepfe" }, verwerfen, speichern, senden),
@@ -76,8 +100,45 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
     entwurf.betreff = betreff.value;
     entwurf.text = text.value;
     entwurf.html = html.checked;
+    entwurf.verschluesseln = verschluesseln.checked;
+    entwurf.signieren = signieren.checked;
     return entwurf;
   };
+
+  /** Prüft Schlüssel und zeigt, was fehlt. Gibt die Prüfung zurück (oder `null` ohne OpenPGP). */
+  const pgpPruefen = async (): Promise<VersandPruefung | null> => {
+    const daten = lesen();
+    if (!daten.verschluesseln && !daten.signieren) {
+      pgpHinweis.replaceChildren();
+      delete pgpHinweis.dataset.art;
+      return null;
+    }
+    const pruefung = await api.pgpVersandPruefen(daten);
+    const hindernis = versandHindernis(pruefung, !!daten.verschluesseln);
+    if (hindernis) {
+      pgpHinweis.textContent = `⚠ ${hindernis}`;
+      pgpHinweis.dataset.art = "fehler";
+    } else {
+      pgpHinweis.textContent = daten.verschluesseln
+        ? "🔒 Inhalt und Anhänge werden verschlüsselt. Betreff und Empfänger bleiben sichtbar."
+        : "✓ Die Mail wird signiert.";
+      pgpHinweis.dataset.art = "info";
+    }
+    return pruefung;
+  };
+  const pgpPruefenStill = () => {
+    pgpPruefen().catch((fehler) => {
+      pgpHinweis.textContent = fehlertext(fehler);
+      pgpHinweis.dataset.art = "fehler";
+    });
+  };
+  for (const schalter of [verschluesseln, signieren]) schalter.addEventListener("change", pgpPruefenStill);
+  for (const empfaenger of [an, cc, bcc, von]) {
+    empfaenger.addEventListener("change", () => {
+      if (verschluesseln.checked || signieren.checked) pgpPruefenStill();
+    });
+  }
+  if (entwurf.verschluesseln || entwurf.signieren) pgpPruefenStill();
   const anhaengeZeichnen = () => {
     anhangListe.replaceChildren(
       ...entwurf.anhaenge.map((anhang) => {
@@ -136,6 +197,37 @@ export function verfassenOeffnen(optionen: VerfassenOptionen): HTMLDialogElement
     if (!daten.betreff.trim()) {
       const ok = await bestaetigen({ titel: "Ohne Betreff senden?", text: "Die Mail hat keinen Betreff.", ja: "Trotzdem senden" });
       if (!ok) return;
+    }
+    if (daten.verschluesseln || daten.signieren) {
+      // Fehlt ein Schlüssel, wird nicht gesendet – nie unbemerkt unverschlüsselt.
+      let pruefung: VersandPruefung | null;
+      try {
+        pruefung = await pgpPruefen();
+      } catch (fehler) {
+        statusSetzen(fehlertext(fehler), "fehler");
+        return;
+      }
+      if (pruefung) {
+        const hindernis = versandHindernis(pruefung, !!daten.verschluesseln);
+        if (hindernis) {
+          statusSetzen(`Nicht gesendet. ${hindernis}`, "fehler");
+          return;
+        }
+        if (pruefung.passphrase_fuer) {
+          const passphrase = await passphraseAbfragen({
+            titel: "Passphrase zum Signieren",
+            text: `Zum Signieren wird die Passphrase deines Schlüssels benötigt.\nSchlüssel: ${pruefung.passphrase_fuer}`,
+            ja: "Entsperren und senden",
+          });
+          if (passphrase === null) return;
+          try {
+            await api.pgpEntsperren(pruefung.passphrase_fuer, passphrase);
+          } catch (fehler) {
+            statusSetzen(fehlertext(fehler), "fehler");
+            return;
+          }
+        }
+      }
     }
     beschaeftigt(true);
     statusSetzen("Wird gesendet …", "info");
