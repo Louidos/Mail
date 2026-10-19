@@ -161,6 +161,20 @@ wird nur auf Wunsch des Nutzers und nur die eine Mail (`UID EXPUNGE`).
   sie brechen bei bekannten Lücken ab.
 - Dependabot schlägt wöchentlich Updates für Cargo, npm und GitHub Actions vor.
 - Lockfiles (`Cargo.lock`, `package-lock.json`) sind eingecheckt.
+- **Installationspakete** (#48) baut ausschliesslich die CI (`.github/workflows/pakete.yml`), aus genau dem Commit
+  des Releases und erst nach den Prüfungen „Commit liegt auf main“ und „Version stimmt“. Gebaut wird mit gesperrten
+  Lockfiles (`npm ci`, `cargo --locked`), der Rust-Version aus `rust-version` in `Cargo.toml`, ohne Build-Cache und
+  mit `SOURCE_DATE_EPOCH` aus dem Commit-Zeitpunkt; fremde Actions sind auf Commits festgelegt. Bit-für-Bit
+  reproduzierbar sind die Pakete damit noch nicht (u. a. AppImage-Werkzeuge und Zeitstempel der Paketformate).
+- Jedes Release enthält `SHA256SUMS.txt` und einen Herkunftsnachweis (Build Provenance, `actions/attest-build-provenance`)
+  für jedes Paket, prüfbar mit `gh attestation verify <paket> --repo Louidos/Mail`. Release, Tag und Pakete entstehen in
+  einem Workflow-Lauf; scheitert ein Paket, gibt es kein Release.
+- **Code-Signierung** für macOS (mit Notarisierung) und Windows nur, wenn die Zertifikate als Secrets hinterlegt sind;
+  sonst sind die Pakete unsigniert (macOS nur ad hoc signiert), und der Release-Text sagt das. Linux-Pakete sind
+  nicht signiert.
+- Die Pakete enthalten keine Update-Funktion (kein `tauri-plugin-updater`, keine Update-Adresse); ein Test prüft das.
+  Das Windows-Installationsprogramm lädt die WebView2-Laufzeit von Microsoft nach, falls sie fehlt – das ist die
+  einzige Verbindung bei der Installation; SicherMail selbst verbindet sich nicht mit Microsoft.
 
 ## Bekannte Hinweise aus `cargo audit`
 

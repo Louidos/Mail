@@ -10,6 +10,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 ### Hinzugefügt
 
 - Dunkle Darstellung im blau-weissen Design: folgt automatisch der Systemeinstellung oder lässt sich in den Einstellungen auf „Hell“ oder „Dunkel“ festlegen (#47)
+- Jedes Release enthält fertige Installationspakete für Windows, macOS und Linux mit Prüfsummen und Herkunftsnachweis; selbst bauen ist nicht mehr nötig (#48)
 
 ## 0.3.0 – 2026-10-19
 

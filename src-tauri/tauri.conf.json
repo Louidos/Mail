@@ -49,6 +49,10 @@
     "longDescription": "SicherMail ist ein Open-Source-Mailclient mit frei wählbarem IMAP- und SMTP-Server, der nur verschlüsselte Verbindungen zulässt.",
     "copyright": "GPL-3.0-or-later",
     "license": "GPL-3.0-or-later",
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
