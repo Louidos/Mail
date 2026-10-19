@@ -242,13 +242,15 @@ pub fn tls_fehler_einordnen(fehler: &io::Error, angeheftet: bool) -> Verbindungs
         Some(rustls::Error::PeerIncompatible(_)) => VerbindungsFehler::Protokoll(
             "Der Server unterstützt keine sichere TLS-Version (mindestens TLS 1.2 nötig).".into(),
         ),
+        Some(rustls::Error::InvalidMessage(_)) => VerbindungsFehler::Protokoll(
+            "Der Server antwortet nicht verschlüsselt. Spricht der Server an diesem Port TLS (z. B. 993 bzw. 465)?"
+                .into(),
+        ),
         Some(_) => VerbindungsFehler::Protokoll(
             "Die verschlüsselte Verbindung konnte nicht aufgebaut werden.".into(),
         ),
-        None => VerbindungsFehler::Protokoll(
-            "Die Verbindung wurde während des TLS-Aufbaus unterbrochen. Spricht der Server an diesem Port TLS?"
-                .into(),
-        ),
+        // Verbindung während des Handshakes abgebrochen (z. B. Netz weg).
+        None => VerbindungsFehler::Unterbrochen,
     }
 }
 

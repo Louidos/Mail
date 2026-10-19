@@ -58,3 +58,128 @@ pub fn eingabe(benutzer: &str, passwort: &str) -> KontoEingabe {
         smtp: server(SMTP_TLS, Verschluesselung::Tls, true),
     }
 }
+
+/// Neue, eindeutige Adresse beim Test-Mailserver. GreenMail legt das Postfach beim
+/// ersten Empfang an; Benutzername und Passwort sind dann die Adresse selbst.
+pub fn neue_adresse() -> String {
+    format!(
+        "t{}@localhost",
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    )
+}
+
+/// Stellt Mails über SMTP (TLS, hinterlegtes Zertifikat, Anmeldung als „test“) zu.
+pub async fn zustellen(an: &str, betreffe: &[&str]) {
+    use lettre::message::Message;
+    let mut verbindung = sichermail_lib::smtp::anmelden(
+        &server(SMTP_TLS, Verschluesselung::Tls, true),
+        BENUTZER,
+        PASSWORT,
+    )
+    .await
+    .expect("Anmeldung beim Test-SMTP-Server");
+    for betreff in betreffe {
+        let mail = Message::builder()
+            .from("Test Absender <test@localhost>".parse().unwrap())
+            .to(an.parse().unwrap())
+            .subject(*betreff)
+            .body(format!("Inhalt von {betreff}"))
+            .unwrap();
+        verbindung
+            .send(mail.envelope(), &mail.formatted())
+            .await
+            .expect("Mail zustellen");
+    }
+    let _ = verbindung.quit().await;
+}
+
+/// Eigene IMAP-Sitzung direkt zum Test-Mailserver (für Prüfungen „von aussen“).
+pub async fn direkte_sitzung(adresse: &str) -> sichermail_lib::imap::ImapSitzung {
+    sichermail_lib::imap::anmelden(
+        &server(IMAP_TLS, Verschluesselung::Tls, true),
+        adresse,
+        adresse,
+    )
+    .await
+    .expect("direkte IMAP-Anmeldung")
+}
+
+/// Kontoverwaltung mit einem Konto für `adresse` (Postfach muss schon existieren).
+pub async fn konto_mit_imap_port(
+    adresse: &str,
+    imap_port: u16,
+) -> (
+    tempfile::TempDir,
+    std::sync::Arc<sichermail_lib::konto::KontoVerwaltung>,
+    sichermail_lib::konto::Konto,
+) {
+    let ordner = tempfile::tempdir().unwrap();
+    let verwaltung = std::sync::Arc::new(sichermail_lib::konto::KontoVerwaltung::neu(
+        ordner.path(),
+        std::sync::Arc::new(
+            sichermail_lib::konto::schluesselbund::SpeicherSchluesselbund::default(),
+        ),
+    ));
+    let mut e = eingabe(adresse, adresse);
+    e.imap.port = imap_port;
+    let konto = verwaltung.speichern(&e).await.expect("Konto anlegen");
+    (ordner, verwaltung, konto)
+}
+
+/// TCP-Weiterleitung, die sich hart unterbrechen lässt (simuliert Verbindungsabbrüche).
+pub struct Weiterleitung {
+    pub port: u16,
+    offen: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    trennen: tokio::sync::watch::Sender<u64>,
+}
+
+impl Weiterleitung {
+    pub async fn starten(ziel_port: u16) -> Self {
+        use std::sync::atomic::Ordering;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let offen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (trennen, _) = tokio::sync::watch::channel(0u64);
+        let offen_kopie = offen.clone();
+        let trennen_kopie = trennen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut eingehend, _)) = listener.accept().await else {
+                    return;
+                };
+                if !offen_kopie.load(Ordering::SeqCst) {
+                    drop(eingehend);
+                    continue;
+                }
+                let mut signal = trennen_kopie.subscribe();
+                tokio::spawn(async move {
+                    let Ok(mut ausgehend) =
+                        tokio::net::TcpStream::connect(("127.0.0.1", ziel_port)).await
+                    else {
+                        return;
+                    };
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut eingehend, &mut ausgehend) => {}
+                        _ = signal.changed() => {}
+                    }
+                });
+            }
+        });
+        Self {
+            port,
+            offen,
+            trennen,
+        }
+    }
+
+    /// Trennt alle Verbindungen und nimmt keine neuen mehr an.
+    pub fn unterbrechen(&self) {
+        self.offen.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.trennen.send_modify(|n| *n += 1);
+    }
+
+    /// Nimmt wieder Verbindungen an.
+    pub fn wiederherstellen(&self) {
+        self.offen.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}

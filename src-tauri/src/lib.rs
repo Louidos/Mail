@@ -2,7 +2,7 @@
 //!
 //! Module:
 //! - `konto`: Konten mit eigenem IMAP-/SMTP-Server, Passwörter im Schlüsselbund
-//! - `imap`: Mails empfangen
+//! - `imap`: Mails empfangen (IDLE, Synchronisation über UIDs)
 //! - `smtp`: Mails senden
 //! - `tls`: gemeinsame TLS-Regeln (nur rustls, mindestens TLS 1.2, Zertifikate immer geprüft)
 
@@ -15,11 +15,17 @@ pub mod tls;
 
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use befehle::AppZustand;
+use imap::beobachter::{Beobachter, Melder};
+use imap::cache::SpeicherCache;
+use imap::dienst::ImapDienst;
 use konto::schluesselbund::SystemSchluesselbund;
 use konto::KontoVerwaltung;
+
+/// Name des Ereignisses, über das die Oberfläche von neuen Mails erfährt.
+pub const MAIL_EREIGNIS: &str = "mail-ereignis";
 
 /// Startet die Tauri-Anwendung.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,7 +38,35 @@ pub fn run() {
                 &ordner,
                 Arc::new(SystemSchluesselbund),
             ));
-            app.manage(AppZustand { konten });
+            let imap = Arc::new(ImapDienst::neu(
+                konten.clone(),
+                Arc::new(SpeicherCache::default()),
+            ));
+            let beobachter = Arc::new(Beobachter::default());
+            let griff = app.handle().clone();
+            let melder: Melder = Arc::new(move |ereignis| {
+                let _ = griff.emit(MAIL_EREIGNIS, ereignis);
+            });
+
+            // Für alle Konten neue Mails beobachten.
+            {
+                let konten = konten.clone();
+                let imap = imap.clone();
+                let beobachter = beobachter.clone();
+                let melder = melder.clone();
+                tauri::async_runtime::spawn(async move {
+                    for konto in konten.alle().await.unwrap_or_default() {
+                        beobachter.starten(&konto.id, imap.clone(), melder.clone());
+                    }
+                });
+            }
+
+            app.manage(AppZustand {
+                konten,
+                imap,
+                beobachter,
+                melder,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -41,6 +75,11 @@ pub fn run() {
             befehle::konto_speichern,
             befehle::konto_loeschen,
             befehle::autoconfig_suchen,
+            befehle::ordner_auflisten,
+            befehle::mails_auflisten,
+            befehle::mail_gelesen_setzen,
+            befehle::mail_loeschen,
+            befehle::mail_verschieben,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");

@@ -24,6 +24,9 @@ pub enum VerbindungsFehler {
     #[error("Anmeldung fehlgeschlagen. Bitte Benutzername und Passwort prüfen.")]
     AnmeldungFalsch,
 
+    #[error("Die Verbindung zum Server wurde unterbrochen.")]
+    Unterbrochen,
+
     #[error("{0}")]
     Protokoll(String),
 
@@ -32,6 +35,14 @@ pub enum VerbindungsFehler {
 }
 
 impl VerbindungsFehler {
+    /// Lohnt es sich, mit einer neuen Verbindung erneut zu versuchen?
+    pub fn neu_verbinden_sinnvoll(&self) -> bool {
+        matches!(
+            self,
+            Self::Unterbrochen | Self::Zeitueberschreitung | Self::NichtErreichbar { .. }
+        )
+    }
+
     /// Kurzer, maschinenlesbarer Name der Fehlerart (für die Oberfläche und Tests).
     pub fn art(&self) -> &'static str {
         match self {
@@ -40,6 +51,7 @@ impl VerbindungsFehler {
             Self::ZertifikatUngueltig { .. } => "zertifikat_ungueltig",
             Self::KeinStartTls => "kein_starttls",
             Self::AnmeldungFalsch => "anmeldung_falsch",
+            Self::Unterbrochen => "unterbrochen",
             Self::Protokoll(_) => "protokoll",
             Self::Eingabe(_) => "eingabe",
         }

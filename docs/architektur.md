@@ -46,3 +46,21 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   keine Remote-URLs, keine Formulare, keine Fremd-Frames.
 - Capabilities (`src-tauri/capabilities/default.json`): nur das Empfangen von Ereignissen.
   Kein Shell-, Dateisystem- oder HTTP-Zugriff aus dem Frontend.
+
+## Mails empfangen (`imap`)
+
+- **Zwei Verbindungen pro Konto**: eine für Befehle der Oberfläche (`dienst`, wird wiederverwendet und bei
+  Abbruch einmal automatisch neu aufgebaut) und eine zum Beobachten des Posteingangs (`beobachter`).
+- **Beobachter**: IMAP IDLE (alle 25 Minuten erneuert), sonst NOOP und Abgleich alle 2 Minuten. Bei Abbruch
+  neu verbinden mit wachsender Wartezeit (1 s bis 5 min). Die Oberfläche erfährt über das Ereignis
+  `mail-ereignis` von Änderungen (`mails_geaendert`, `verbunden`, `getrennt`).
+- **Abgleich** (`sync`): Ordner auswählen; ändert sich UIDVALIDITY, wird der lokale Stand verworfen.
+  Neue Mails: `UID FETCH <höchste bekannte UID + 1>:*`. Bekannte Mails: Markierungen abgleichen, was
+  der Server nicht mehr hat, lokal entfernen. Mails werden über ihre UID gespeichert, daher gibt es keine
+  Duplikate; da immer ab der höchsten bekannten UID nachgeladen wird, fehlt nach Abbrüchen keine.
+- **Seitenweise**: Erster Abgleich lädt die neuesten 100 Köpfe, ältere werden mit `UID SEARCH` nachgeladen.
+- **Inhalte** mit `BODY.PEEK[]`, damit Mails nicht ungefragt als gelesen gelten.
+- **Nie automatisch löschen**: kein `CLOSE`, kein allgemeines `EXPUNGE`. Gelöscht wird nur auf Wunsch des
+  Nutzers: Verschieben in den Papierkorb (`UID MOVE`, sonst `UID COPY` + `\Deleted`), endgültig nur die
+  eine Mail per `UID EXPUNGE` (UIDPLUS). Ohne UIDPLUS bleibt sie als gelöscht markiert und wird ausgeblendet.
+- **Zwischenspeicher** über die Schnittstelle `MailCache`; derzeit im Arbeitsspeicher (`SpeicherCache`).
