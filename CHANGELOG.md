@@ -7,6 +7,8 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+## 0.1.0 – 2026-10-19
+
 ### Hinzugefügt
 
 - Grundgerüst des Programms: SicherMail startet mit einem leeren Fenster (#1)
