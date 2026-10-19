@@ -1,7 +1,11 @@
-/** Dialog „Einstellungen“: lokaler Speicher und freigegebene Absender. */
+/** Dialog „Einstellungen“: lokaler Speicher, Proxy für externe Bilder und freigegebene Absender. */
 import { api, fehlertext, type Einstellungen } from "../api";
 import { bestaetigen, modalSchliessen, modalZeigen } from "../dialoge";
 import { el } from "../dom";
+
+/** Warnhinweis zum Proxy für externe Bilder (#46). */
+export const PROXY_HINWEIS =
+  "Der Proxy löst Adressen selbst auf. SicherMail kann dann nicht mehr vollständig verhindern, dass Bilder aus deinem eigenen Netz geladen werden.";
 
 /**
  * Öffnet die Einstellungen. `geaendert` wird aufgerufen, wenn sich der lokale
@@ -75,6 +79,52 @@ export async function einstellungenOeffnen(geaendert: () => void): Promise<HTMLD
       }
     });
 
+    const proxyAn = el("input", { type: "checkbox", name: "proxy_externe_bilder", checked: e.proxy_externe_bilder });
+    const proxyAdresse = el("input", {
+      type: "text",
+      name: "proxy_adresse",
+      value: e.proxy_adresse,
+      placeholder: "http://proxy.example.org:3128",
+      autocomplete: "off",
+      spellcheck: "false",
+      "aria-label": "Proxy-Adresse",
+      disabled: !e.proxy_externe_bilder,
+    });
+    const proxyUebernehmen = el(
+      "button",
+      { type: "button", class: "klein", disabled: !e.proxy_externe_bilder },
+      "Proxy übernehmen",
+    );
+    const proxySpeichern = async () => {
+      try {
+        await api.proxySetzen(true, proxyAdresse.value.trim());
+        statusSetzen("Externe Bilder werden nach deiner Freigabe über den Proxy geladen.", "erfolg");
+      } catch (fehler) {
+        statusSetzen(`${fehlertext(fehler)} Externe Bilder bleiben blockiert.`, "fehler");
+      }
+    };
+    proxyAn.addEventListener("change", async () => {
+      proxyAdresse.disabled = !proxyAn.checked;
+      proxyUebernehmen.disabled = !proxyAn.checked;
+      if (proxyAn.checked) {
+        // Gespeichert wird erst eine gültige Adresse („Proxy übernehmen“).
+        if (proxyAdresse.value.trim()) {
+          await proxySpeichern();
+        } else {
+          statusSetzen("Bitte die Proxy-Adresse eintragen und übernehmen.", "info");
+          proxyAdresse.focus();
+        }
+        return;
+      }
+      try {
+        await api.proxySetzen(false, proxyAdresse.value.trim());
+        statusSetzen("Externe Bilder werden wieder direkt geladen, nie über einen Proxy.", "erfolg");
+      } catch (fehler) {
+        statusSetzen(fehlertext(fehler), "fehler");
+      }
+    });
+    proxyUebernehmen.addEventListener("click", () => void proxySpeichern());
+
     const absender = el("ul", { class: "absender-liste" });
     for (const adresse of e.externe_inhalte_erlaubt) {
       const entfernen = el("button", { type: "button", class: "klein" }, "Entfernen");
@@ -102,6 +152,19 @@ export async function einstellungenOeffnen(geaendert: () => void): Promise<HTMLD
         ),
         e.speicher_hinweis ? el("p", { class: "warnung" }, e.speicher_hinweis) : null,
         leeren,
+      ),
+      el(
+        "section",
+        { class: "einstellung" },
+        el("h3", {}, "Externe Bilder"),
+        el("label", { class: "umschalter gross" }, proxyAn, "Proxy für externe Bilder verwenden"),
+        el(
+          "p",
+          { class: "leise" },
+          "Nur nötig, wenn dein Rechner ausschliesslich über einen Proxy ins Internet kommt. Ohne diese Einstellung lädt SicherMail externe Bilder immer direkt und nie über einen Proxy – auch nicht über einen im System eingestellten. Erlaubt ist eine Adresse mit http:// oder https://, Server und Port, ohne Benutzername und Passwort.",
+        ),
+        el("div", { class: "proxy-zeile" }, proxyAdresse, proxyUebernehmen),
+        el("p", { class: "warnung", role: "note" }, PROXY_HINWEIS),
       ),
       el(
         "section",

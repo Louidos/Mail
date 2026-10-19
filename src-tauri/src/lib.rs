@@ -107,6 +107,7 @@ pub fn run() {
             befehle::lokal_speichern_setzen,
             befehle::lokalen_speicher_leeren,
             befehle::absender_extern_entfernen,
+            befehle::proxy_setzen,
             befehle::anhang_waehlen,
             befehle::mail_anhaenge_uebernehmen,
             befehle::mail_senden,

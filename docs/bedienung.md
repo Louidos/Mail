@@ -86,8 +86,9 @@ SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keine
   einem abgeschotteten Bereich angezeigt, in dem nichts ausgeführt und nichts aus dem Internet geladen wird.
 - **Externe Inhalte** (z. B. Bilder von Webseiten, oft unsichtbare „Tracking-Pixel“) sind blockiert.
   Eine Leiste zeigt, wie viele blockiert wurden:
-  - **Externe Inhalte laden** lädt sie für diese eine Mail – nur über verschlüsseltes HTTPS und immer direkt,
-    nie über einen Proxy. Kommt dein Rechner nur über einen Proxy ins Internet, bleiben externe Bilder deshalb leer.
+  - **Externe Inhalte laden** lädt sie für diese eine Mail – nur über verschlüsseltes HTTPS und standardmässig immer
+    direkt, nie über einen Proxy. Kommt dein Rechner nur über einen Proxy ins Internet, bleiben externe Bilder leer,
+    bis du unter **Einstellungen** den Proxy für externe Bilder einschaltest (siehe unten).
   - **Für … immer erlauben** lädt sie bei diesem Absender künftig automatisch.
 - **Links** öffnen sich erst nach einem Klick im Standardbrowser. Beim Überfahren mit der Maus siehst du das
   echte Ziel. Zeigt der Linktext eine andere Adresse als das echte Ziel (typisch für Phishing), warnt
@@ -147,6 +148,21 @@ Unter **Einstellungen** steht **Mails lokal speichern (verschlüsselt)** – sta
 
 Unter **Externe Inhalte immer erlaubt für** lassen sich freigegebene Absender wieder entfernen.
 
+## Externe Bilder über einen Proxy
+
+Kommt dein Rechner nur über einen Proxy ins Internet (z. B. im Firmennetz), kannst du unter **Einstellungen** →
+**Externe Bilder** den Schalter **Proxy für externe Bilder verwenden** einschalten, die Adresse eintragen
+(z. B. `http://proxy.example.org:3128`) und **Proxy übernehmen** klicken.
+
+- Standardmässig ist der Schalter aus: Dann lädt SicherMail externe Bilder immer direkt und nie über einen Proxy –
+  auch nicht über einen im System eingestellten (`HTTPS_PROXY` usw.).
+- Erlaubt ist nur `http://` oder `https://` mit Server und Port, ohne Benutzername und Passwort. Bei einer ungültigen
+  Adresse erscheint eine Meldung, und externe Bilder bleiben blockiert. SOCKS wird nicht unterstützt.
+- Geladen wird weiterhin nur nach deiner Freigabe (pro Mail oder für einen Absender).
+- **Einschränkung:** Der Proxy löst Adressen selbst auf. SicherMail kann dann nicht mehr vollständig verhindern, dass
+  Bilder aus deinem eigenen Netz geladen werden. Offensichtliche Adressen im eigenen Netz (z. B. `192.168.…`,
+  `localhost`) lehnt SicherMail trotzdem ab, bevor sie den Proxy erreichen.
+
 ## Wo liegen meine Daten?
 
 - Kontoeinstellungen ohne Passwort: `konten.json` im App-Datenordner
@@ -155,4 +171,4 @@ Unter **Externe Inhalte immer erlaubt für** lassen sich freigegebene Absender w
 - Passwörter: ausschliesslich im Schlüsselbund des Betriebssystems (Eintrag „SicherMail“).
 - Zwischengespeicherte Mails: `mails.db` im App-Datenordner, verschlüsselt mit SQLCipher; der Schlüssel liegt im
   Schlüsselbund (Eintrag `speicher:schluessel`).
-- Einstellungen: `einstellungen.json` im App-Datenordner.
+- Einstellungen (inkl. freigegebener Absender und Proxy-Adresse): `einstellungen.json` im App-Datenordner.

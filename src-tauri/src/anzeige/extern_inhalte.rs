@@ -5,8 +5,12 @@
 //! - Keine Cookies, kein Referer.
 //! - Keine Adressen im eigenen Netz (localhost, private, Link-Local …), auch nicht über
 //!   Weiterleitungen oder DNS: Eine Mail soll so keine Geräte im Heimnetz ansprechen können.
-//! - Nie über einen Proxy, auch nicht über einen im System eingestellten (`HTTPS_PROXY` …):
-//!   Ein Proxy löst Namen selbst auf, die Prüfung auf eigene Netzadressen griffe dann nicht (#24).
+//! - Standardmässig nie über einen Proxy, auch nicht über einen im System eingestellten
+//!   (`HTTPS_PROXY` …): Ein Proxy löst Namen selbst auf, die Prüfung auf eigene Netzadressen
+//!   griffe dann nicht (#24).
+//! - Nur wenn der Nutzer es ausdrücklich einschaltet, geht alles über die eine eingetragene
+//!   Proxy-Adresse (#46). IP-Adressen im eigenen Netz und lokale Namen werden auch dann vorher
+//!   abgelehnt; Namen, die erst der Proxy auflöst, kann SicherMail aber nicht mehr prüfen.
 //!
 //! Die Bilder werden als `data:`-Adressen in die bereinigte Mail eingesetzt, damit die
 //! Anzeige selbst nie Verbindungen aufbaut.
@@ -18,14 +22,77 @@ use std::time::Duration;
 
 use base64::Engine as _;
 
+use crate::fehler::Fehlermeldung;
+
 const MAX_BILDER: usize = 40;
 const MAX_GROESSE: usize = 5 * 1024 * 1024;
 const ERLAUBTE_TYPEN: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
+/// Vom Nutzer eingetragene, geprüfte Proxy-Adresse für externe Bilder (#46).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyAdresse(reqwest::Url);
+
+impl ProxyAdresse {
+    /// Prüft die Eingabe: nur `http://` oder `https://` mit Host und Port, ohne Zugangsdaten,
+    /// Pfad oder Abfrage.
+    pub fn pruefen(eingabe: &str) -> Result<Self, Fehlermeldung> {
+        let ungueltig = || {
+            Fehlermeldung::neu(
+                "eingabe",
+                "Ungültige Proxy-Adresse. Erlaubt ist nur http:// oder https:// mit Server und Port, z. B. http://proxy.example.org:3128 – ohne Benutzername und Passwort.",
+            )
+        };
+        let eingabe = eingabe.trim();
+        if eingabe.is_empty() || eingabe.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(ungueltig());
+        }
+        let klein = eingabe.to_ascii_lowercase();
+        let Some(rest) = klein
+            .strip_prefix("http://")
+            .or_else(|| klein.strip_prefix("https://"))
+        else {
+            return Err(ungueltig());
+        };
+        // Der Teil zwischen „://“ und dem ersten „/“ muss genau „Host:Port“ sein.
+        let (autoritaet, pfad) = rest.split_once('/').unwrap_or((rest, ""));
+        let port_angegeben = autoritaet.rsplit_once(':').is_some_and(|(host, port)| {
+            !host.is_empty()
+                && !port.is_empty()
+                && port.chars().all(|c| c.is_ascii_digit())
+                && port.parse::<u16>().is_ok_and(|p| p > 0)
+        });
+        if autoritaet.contains('@') || !pfad.is_empty() || !port_angegeben {
+            return Err(ungueltig());
+        }
+        let url = reqwest::Url::parse(eingabe).map_err(|_| ungueltig())?;
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none_or(str::is_empty)
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(ungueltig());
+        }
+        Ok(Self(url))
+    }
+
+    /// Die Adresse als Text (für Anzeige und Tests).
+    pub fn als_text(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// Lädt die Bilder und gibt Adresse → `data:`-Adresse zurück. Nicht ladbare fehlen.
-pub async fn bilder_laden(adressen: &[String]) -> HashMap<String, String> {
+///
+/// Ohne `proxy` wird immer direkt verbunden, nie über einen System-Proxy. Mit `proxy` gehen
+/// alle Anfragen (auch Weiterleitungen) nur über diese Adresse.
+pub async fn bilder_laden(
+    adressen: &[String],
+    proxy: Option<&ProxyAdresse>,
+) -> HashMap<String, String> {
     let mut ergebnis = HashMap::new();
-    let Ok(client) = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .https_only(true)
         .min_tls_version(reqwest::tls::Version::TLS_1_2)
         .redirect(reqwest::redirect::Policy::custom(|versuch| {
@@ -37,13 +104,20 @@ pub async fn bilder_laden(adressen: &[String]) -> HashMap<String, String> {
                 versuch.follow()
             }
         }))
-        .dns_resolver(Arc::new(NurOeffentlich))
-        // Nie über einen Proxy: Er würde Namen selbst auflösen und `NurOeffentlich` umgehen (#24).
-        .no_proxy()
         .timeout(Duration::from_secs(15))
-        .referer(false)
-        .build()
-    else {
+        .referer(false);
+    let builder = match proxy {
+        // Nur die eingetragene Adresse, nie System- oder Umgebungs-Proxys (`Proxy::all` liest
+        // keine Umgebungsvariablen, `.proxy()` schaltet die automatische Erkennung ab). Aufgelöst
+        // wird dann nur noch der Name des Proxys selbst; der darf im eigenen Netz liegen.
+        Some(proxy) => match reqwest::Proxy::all(proxy.0.clone()) {
+            Ok(p) => builder.proxy(p),
+            Err(_) => return ergebnis,
+        },
+        // Nie über einen Proxy: Er würde Namen selbst auflösen und `NurOeffentlich` umgehen (#24).
+        None => builder.dns_resolver(Arc::new(NurOeffentlich)).no_proxy(),
+    };
+    let Ok(client) = builder.build() else {
         return ergebnis;
     };
 
@@ -178,8 +252,52 @@ mod tests {
 
     #[tokio::test]
     async fn http_wird_nie_geladen() {
-        let ergebnis = bilder_laden(&["http://127.0.0.1:9/bild.png".to_string()]).await;
+        let ergebnis = bilder_laden(&["http://127.0.0.1:9/bild.png".to_string()], None).await;
         assert!(ergebnis.is_empty());
+    }
+
+    #[test]
+    fn proxy_adresse_wird_geprueft() {
+        for gueltig in [
+            "http://proxy.example.org:3128",
+            "https://proxy.example.org:8443/",
+            " http://10.0.0.1:8080 ",
+            "http://[fd00::1]:3128",
+            "HTTP://Proxy.Example.org:80",
+        ] {
+            assert!(
+                ProxyAdresse::pruefen(gueltig).is_ok(),
+                "{gueltig} müsste gültig sein"
+            );
+        }
+        for ungueltig in [
+            "",
+            "proxy.example.org:3128",
+            "socks5://proxy.example.org:1080",
+            "ftp://proxy.example.org:21",
+            "http://proxy.example.org",
+            "http://proxy.example.org:",
+            "http://proxy.example.org:0",
+            "http://proxy.example.org:99999",
+            "http://:3128",
+            "http://anna:geheim@proxy.example.org:3128",
+            "http://anna@proxy.example.org:3128",
+            "http://proxy.example.org:3128/pfad",
+            "http://proxy.example.org:3128?x=1",
+            "http://proxy.example.org:3128#x",
+            "http://proxy example.org:3128",
+        ] {
+            assert!(
+                ProxyAdresse::pruefen(ungueltig).is_err(),
+                "{ungueltig} müsste abgelehnt werden"
+            );
+        }
+        assert_eq!(
+            ProxyAdresse::pruefen("http://proxy.example.org:3128")
+                .unwrap()
+                .als_text(),
+            "http://proxy.example.org:3128/"
+        );
     }
 
     #[test]

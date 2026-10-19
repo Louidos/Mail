@@ -681,6 +681,18 @@ p.warnung {
   padding: var(--abstand-3) 0;
 }
 
+.proxy-zeile {
+  display: flex;
+  align-items: center;
+  gap: var(--abstand-2);
+  margin: var(--abstand-2) 0;
+}
+
+.proxy-zeile input {
+  flex: 1;
+  min-width: 0;
+}
+
 ul.absender-liste,
 ul.entwurf-liste {
   list-style: none;

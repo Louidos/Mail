@@ -122,6 +122,10 @@ export interface AufbereiteteMail {
 export interface Einstellungen {
   lokal_speichern: boolean;
   externe_inhalte_erlaubt: string[];
+  /** Externe Bilder über den eingetragenen Proxy laden (standardmässig aus). */
+  proxy_externe_bilder: boolean;
+  /** Proxy-Adresse, z. B. `http://proxy.example.org:3128`. */
+  proxy_adresse: string;
   /** Gesetzt, wenn der verschlüsselte Speicher nicht verfügbar ist. */
   speicher_hinweis: string | null;
 }
@@ -188,6 +192,7 @@ export const api = {
   lokalSpeichernSetzen: (an: boolean) => invoke<void>("lokal_speichern_setzen", { an }),
   lokalenSpeicherLeeren: () => invoke<void>("lokalen_speicher_leeren"),
   absenderExternEntfernen: (adresse: string) => invoke<void>("absender_extern_entfernen", { adresse }),
+  proxySetzen: (an: boolean, adresse: string) => invoke<void>("proxy_setzen", { an, adresse }),
   anhangWaehlen: () => invoke<AnhangAuswahl[]>("anhang_waehlen"),
   mailAnhaengeUebernehmen: (konto: string, ordner: string, uid: number) =>
     invoke<AnhangAuswahl[]>("mail_anhaenge_uebernehmen", { konto, ordner, uid }),
