@@ -63,9 +63,27 @@ pub struct SyncErgebnis {
     pub geaendert: bool,
 }
 
+/// UID-Bereich für Mails, die neuer sind als die grösste bekannte UID.
+///
+/// Sättigend gerechnet: Bei der grössten möglichen UID darf es keinen Überlauf geben.
+fn bereich_neue(groesste: u32) -> String {
+    format!("{}:*", groesste.saturating_add(1))
+}
+
+/// Grösste UID, die für „ältere Mails“ in Frage kommt, oder `None`, wenn es keine gibt.
+fn grenze_aeltere(kleinste: Option<u32>) -> Option<u32> {
+    match kleinste {
+        // UIDs beginnen bei 1 (UID 0 ist laut IMAP ungültig).
+        Some(0 | 1) => None,
+        Some(kleinste) => Some(kleinste - 1),
+        None => Some(u32::MAX),
+    }
+}
+
 /// Macht aus einer FETCH-Antwort einen Mailkopf. Mails mit \Deleted werden übersprungen.
 pub fn kopf_aus_fetch(fetch: &Fetch) -> Option<MailKopf> {
-    let uid = fetch.uid?;
+    // UID 0 ist laut IMAP ungültig und würde den Abgleich durcheinanderbringen.
+    let uid = fetch.uid.filter(|&uid| uid != 0)?;
     let mut gelesen = false;
     let mut markiert = false;
     for flag in fetch.flags() {
@@ -191,7 +209,7 @@ pub async fn ordner_abgleichen(
     };
 
     // Neue Mails. „n:*“ liefert immer mindestens die letzte Mail, daher filtern.
-    let neue: Vec<MailKopf> = koepfe_holen(sitzung, &format!("{}:*", groesste + 1), true)
+    let neue: Vec<MailKopf> = koepfe_holen(sitzung, &bereich_neue(groesste), true)
         .await?
         .into_iter()
         .filter(|k| k.uid > groesste)
@@ -252,10 +270,8 @@ pub async fn aeltere_laden(
     anzahl: usize,
 ) -> Result<usize, SyncFehler> {
     let bekannt = cache.uids(konto, ordner)?;
-    let grenze = match bekannt.first() {
-        Some(1) => return Ok(0),
-        Some(&kleinste) => kleinste - 1,
-        None => u32::MAX,
+    let Some(grenze) = grenze_aeltere(bekannt.first().copied()) else {
+        return Ok(0);
     };
     let mut aeltere: Vec<u32> = sitzung
         .uid_search(format!("UID 1:{grenze} UNDELETED"))
@@ -282,6 +298,16 @@ pub async fn aeltere_laden(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uid_grenzen_laufen_nicht_ueber() {
+        assert_eq!(bereich_neue(41), "42:*");
+        assert_eq!(bereich_neue(u32::MAX), format!("{}:*", u32::MAX));
+        assert_eq!(grenze_aeltere(None), Some(u32::MAX));
+        assert_eq!(grenze_aeltere(Some(42)), Some(41));
+        assert_eq!(grenze_aeltere(Some(1)), None);
+        assert_eq!(grenze_aeltere(Some(0)), None);
+    }
 
     #[test]
     fn kopfzeilen_mit_kodiertem_betreff() {
