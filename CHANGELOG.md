@@ -7,6 +7,8 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+## 0.2.0 – 2026-10-19
+
 ### Geändert
 
 - Neues, ruhigeres Design in Blau und Weiss mit abgerundeten Ecken, weichen Schatten und gut sichtbarem Tastaturfokus; die dunkle Darstellung entfällt dabei (#31)
