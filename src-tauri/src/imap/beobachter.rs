@@ -30,6 +30,9 @@ pub const ABFRAGE_ABSTAND: Duration = Duration::from_secs(120);
 /// IDLE wird spätestens nach dieser Zeit erneuert (RFC 2177: unter 29 Minuten).
 const IDLE_DAUER: Duration = Duration::from_secs(25 * 60);
 
+/// So viele der neuesten Mails im Posteingang werden für das Lesen ohne Internet vorgeladen.
+pub const VORLADEN_ANZAHL: usize = 50;
+
 /// Längste Wartezeit zwischen zwei Verbindungsversuchen.
 const MAX_WARTEZEIT: Duration = Duration::from_secs(300);
 
@@ -212,6 +215,17 @@ async fn abgleichen_und_melden(
             konto: konto_id.to_string(),
             ordner: POSTEINGANG.to_string(),
         });
+    }
+    // Neue Mails gleich mitladen, damit sie auch ohne Internet lesbar sind.
+    if dienst.vorladen() {
+        if let Err(fehler) = dienst
+            .inhalte_vorladen(konto_id, POSTEINGANG, VORLADEN_ANZAHL)
+            .await
+        {
+            if crate::imap::dienst::ist_offline_fehler(&fehler) {
+                return Err(fehler);
+            }
+        }
     }
     Ok(())
 }

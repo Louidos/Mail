@@ -96,9 +96,27 @@ SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keine
   ab. Prüfe Dateien, bevor du sie öffnest.
 - **Nur Text anzeigen** zeigt statt der HTML-Fassung den reinen Text der Mail.
 
+## Lesen ohne Internet (lokaler Speicher)
+
+Unter **Einstellungen** steht **Mails lokal speichern (verschlüsselt)** – standardmässig eingeschaltet.
+
+- Geladene Mails und die neuesten 50 Mails im Posteingang werden in einer verschlüsselten Datenbank auf dem
+  Gerät abgelegt. Ohne Internet zeigt SicherMail diese Mails weiterhin an (mit einem Hinweis oben in der Liste).
+- Der Schlüssel wird beim ersten Start zufällig erzeugt und liegt nur im Schlüsselbund des Betriebssystems.
+  Ohne ihn ist die Datenbank nicht lesbar. Geht er verloren, legt SicherMail die Datenbank neu an und lädt
+  die Mails wieder vom Server.
+- **Lokalen Speicher leeren** löscht alle zwischengespeicherten Mails vom Gerät (auf dem Server bleibt alles).
+- Wird die Einstellung ausgeschaltet, werden alle lokal gespeicherten Mails gelöscht; Mails werden dann nur
+  noch bis zum Beenden im Arbeitsspeicher gehalten.
+
+Unter **Externe Inhalte immer erlaubt für** lassen sich freigegebene Absender wieder entfernen.
+
 ## Wo liegen meine Daten?
 
 - Kontoeinstellungen ohne Passwort: `konten.json` im App-Datenordner
   (Linux: `~/.local/share/ch.sichermail.app/`, macOS: `~/Library/Application Support/ch.sichermail.app/`,
   Windows: `%APPDATA%\ch.sichermail.app\`).
 - Passwörter: ausschliesslich im Schlüsselbund des Betriebssystems (Eintrag „SicherMail“).
+- Zwischengespeicherte Mails: `mails.db` im App-Datenordner, verschlüsselt mit SQLCipher; der Schlüssel liegt im
+  Schlüsselbund (Eintrag `speicher:schluessel`).
+- Einstellungen: `einstellungen.json` im App-Datenordner.

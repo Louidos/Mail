@@ -3,8 +3,10 @@
 //! Das Frontend hat selbst keinen Zugriff auf Netzwerk oder Dateisystem;
 //! alles läuft über diese Befehle.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -13,10 +15,13 @@ use crate::anzeige::{self, extern_inhalte, AufbereiteteMail};
 use crate::einstellungen::EinstellungsSpeicher;
 use crate::fehler::Fehlermeldung;
 use crate::imap::beobachter::{Beobachter, Melder};
+use crate::imap::cache::{MailCache, SpeicherCache};
 use crate::imap::dienst::{ImapDienst, MailSeite};
 use crate::imap::ordner::Ordner;
 use crate::konto::autoconfig::{self, Vorschlag};
+use crate::konto::schluesselbund::Schluesselbund;
 use crate::konto::{Konto, KontoEingabe, KontoVerwaltung, Pruefergebnis};
+use crate::speicher::{self, SqlCache};
 
 /// Höchstens so viele Mails pro Seite.
 const MAX_SEITE: usize = 200;
@@ -28,6 +33,43 @@ pub struct AppZustand {
     pub beobachter: Arc<Beobachter>,
     pub melder: Melder,
     pub einstellungen: Arc<EinstellungsSpeicher>,
+    pub schluesselbund: Arc<dyn Schluesselbund>,
+    pub datenordner: PathBuf,
+    /// Hinweis, falls der verschlüsselte Speicher nicht geöffnet werden konnte.
+    pub speicher_hinweis: Mutex<Option<String>>,
+}
+
+impl AppZustand {
+    /// Richtet den Zwischenspeicher ein: verschlüsselt auf der Festplatte oder nur im
+    /// Arbeitsspeicher. Gibt einen Hinweis zurück, falls der verschlüsselte Speicher
+    /// nicht verfügbar ist.
+    pub fn speicher_einrichten(
+        datenordner: &std::path::Path,
+        schluesselbund: &dyn Schluesselbund,
+        lokal_speichern: bool,
+    ) -> (Arc<dyn MailCache>, Option<String>) {
+        if !lokal_speichern {
+            return (Arc::new(SpeicherCache::default()), None);
+        }
+        match SqlCache::mit_schluesselbund(datenordner, schluesselbund) {
+            Ok(cache) => (Arc::new(cache), None),
+            Err(fehler) => (
+                Arc::new(SpeicherCache::default()),
+                Some(format!(
+                    "Der verschlüsselte lokale Speicher ist nicht verfügbar ({}). Mails werden nur bis zum Beenden im Arbeitsspeicher gehalten.",
+                    fehler.meldung
+                )),
+            ),
+        }
+    }
+}
+
+/// Einstellungen für die Oberfläche.
+#[derive(Debug, Clone, Serialize)]
+pub struct EinstellungenAnsicht {
+    pub lokal_speichern: bool,
+    pub externe_inhalte_erlaubt: Vec<String>,
+    pub speicher_hinweis: Option<String>,
 }
 
 #[tauri::command]
@@ -93,6 +135,20 @@ pub async fn mails_auflisten(
         .imap
         .mails_seite(&konto, &ordner, start, anzahl.clamp(1, MAX_SEITE))
         .await
+}
+
+/// Mailliste sofort aus dem lokalen Speicher (danach gleicht `mails_auflisten` ab).
+#[tauri::command]
+pub async fn mails_lokal(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: String,
+    start: usize,
+    anzahl: usize,
+) -> Result<MailSeite, Fehlermeldung> {
+    zustand
+        .imap
+        .mails_lokal(&konto, &ordner, start, anzahl.clamp(1, MAX_SEITE))
 }
 
 #[tauri::command]
@@ -228,6 +284,62 @@ pub async fn link_oeffnen(app: AppHandle, url: String) -> Result<(), Fehlermeldu
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|_| Fehlermeldung::neu("link", "Der Link konnte nicht geöffnet werden."))
+}
+
+#[tauri::command]
+pub async fn einstellungen_laden(
+    zustand: State<'_, AppZustand>,
+) -> Result<EinstellungenAnsicht, Fehlermeldung> {
+    let einstellungen = zustand.einstellungen.laden().await;
+    Ok(EinstellungenAnsicht {
+        lokal_speichern: einstellungen.lokal_speichern,
+        externe_inhalte_erlaubt: einstellungen.externe_inhalte_erlaubt,
+        speicher_hinweis: zustand.speicher_hinweis.lock().ok().and_then(|h| h.clone()),
+    })
+}
+
+/// Schaltet „Mails lokal speichern“ um. Beim Ausschalten wird der lokale Speicher
+/// geleert und die Datei gelöscht.
+#[tauri::command]
+pub async fn lokal_speichern_setzen(
+    zustand: State<'_, AppZustand>,
+    an: bool,
+) -> Result<(), Fehlermeldung> {
+    zustand
+        .einstellungen
+        .aendern(|e| e.lokal_speichern = an)
+        .await?;
+    let alt = zustand.imap.cache();
+    let (neu, hinweis) =
+        AppZustand::speicher_einrichten(&zustand.datenordner, zustand.schluesselbund.as_ref(), an);
+    zustand.imap.cache_ersetzen(neu);
+    zustand.imap.vorladen_setzen(an && hinweis.is_none());
+    if let Ok(mut h) = zustand.speicher_hinweis.lock() {
+        *h = hinweis;
+    }
+    if !an {
+        alt.leeren()?;
+        drop(alt);
+        let _ = std::fs::remove_file(zustand.datenordner.join(speicher::DATEINAME));
+        zustand
+            .schluesselbund
+            .loeschen(speicher::SCHLUESSEL_EINTRAG)?;
+    }
+    Ok(())
+}
+
+/// Entfernt alle zwischengespeicherten Mails (lokal; auf dem Server bleibt alles).
+#[tauri::command]
+pub async fn lokalen_speicher_leeren(zustand: State<'_, AppZustand>) -> Result<(), Fehlermeldung> {
+    zustand.imap.cache().leeren()
+}
+
+#[tauri::command]
+pub async fn absender_extern_entfernen(
+    zustand: State<'_, AppZustand>,
+    adresse: String,
+) -> Result<(), Fehlermeldung> {
+    zustand.einstellungen.extern_entfernen(&adresse).await
 }
 
 #[cfg(test)]
