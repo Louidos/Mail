@@ -443,7 +443,7 @@ export class App {
               class: gewaehlt ? "ordner-knopf gewaehlt" : "ordner-knopf",
               disabled: !o.waehlbar,
               "aria-current": gewaehlt ? "true" : undefined,
-              style: `padding-left: ${0.5 + ordnerTiefe(o.name, o.trenner)}rem`,
+              style: `--tiefe: ${ordnerTiefe(o.name, o.trenner)}`,
             },
             o.sonder === "posteingang" ? o.anzeigename : ordnerKurzname(o.anzeigename, o.trenner),
           );

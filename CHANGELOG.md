@@ -7,6 +7,10 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+### Geändert
+
+- Neues, ruhigeres Design in Blau und Weiss mit abgerundeten Ecken, weichen Schatten und gut sichtbarem Tastaturfokus; die dunkle Darstellung entfällt dabei (#31)
+
 ### Behoben
 
 - Eine präparierte Mail mit vielen Verweisen auf dasselbe Bild kann SicherMail beim Öffnen nicht mehr durch vollen Arbeitsspeicher zum Absturz bringen (#22)

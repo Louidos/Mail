@@ -6,6 +6,7 @@ import {
   linksVorbereiten,
   MAIL_CSP,
   mailDokument,
+  mailFarben,
   mailRahmen,
   textMitLinks,
 } from "../src/postfach/sicher";
@@ -29,6 +30,32 @@ describe("abgeschottete Anzeige", () => {
     expect(dokument).toContain(`<meta http-equiv="Content-Security-Policy" content="${MAIL_CSP}">`);
     // Die CSP steht vor dem Inhalt der Mail.
     expect(dokument.indexOf("Content-Security-Policy")).toBeLessThan(dokument.indexOf("<p>x</p>"));
+  });
+
+  it("übernimmt die Farben aus den zentralen CSS-Variablen", () => {
+    const stil = document.createElement("style");
+    stil.textContent = ":root { --weiss: #ffffff; --text: #1f2937; --blau: #2563eb; }";
+    document.head.append(stil);
+    try {
+      expect(mailFarben()).toEqual({ hintergrund: "#ffffff", text: "#1f2937", link: "#2563eb" });
+      const dokument = mailDokument("<p>x</p>", "Titel");
+      expect(dokument).toContain("background:#ffffff;color:#1f2937");
+      expect(dokument).toContain("a{color:#2563eb;");
+    } finally {
+      stil.remove();
+    }
+  });
+
+  it("nimmt ohne Design oder bei ungültigen Werten die Systemfarben", () => {
+    expect(mailFarben()).toEqual({ hintergrund: "Canvas", text: "CanvasText", link: "LinkText" });
+    const stil = document.createElement("style");
+    stil.textContent = ":root { --text: red}body{x:1; }";
+    document.head.append(stil);
+    try {
+      expect(mailFarben().text).toBe("CanvasText");
+    } finally {
+      stil.remove();
+    }
   });
 
   it("maskiert den Titel", () => {

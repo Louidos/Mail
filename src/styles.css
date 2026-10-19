@@ -1,36 +1,66 @@
-:root {
-  color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 15px;
-  --hintergrund: #f6f7f9;
-  --flaeche: #ffffff;
-  --flaeche-2: #eef1f5;
-  --text: #1d2330;
-  --text-leise: #5b6475;
-  --rand: #d9dde5;
-  --akzent: #1f6f5c;
-  --akzent-text: #ffffff;
-  --warnung: #8a5300;
-  --warnung-flaeche: #fff4e0;
-  --fehler: #b3261e;
-  --erfolg: #1f6f3a;
+/*
+ * Design von SicherMail: Blau (#2563EB) auf Weiss, abgerundet, ruhig.
+ *
+ * Alle Farben, Abstände, Radien, Schatten und Schriftgrössen stehen nur hier als
+ * Variablen. Im übrigen Code keine festen Farbwerte verwenden, sondern diese Variablen.
+ * `::backdrop` steht mit dabei, weil es die Variablen von `:root` nicht überall erbt.
+ */
+:root,
+::backdrop {
+  /* Hauptfarbe und Abstufungen */
+  --blau: #2563eb;
+  --blau-dunkel: #1d4ed8;
+  --blau-hell: #eff6ff;
+  --blau-rand: #dbeafe;
+
+  /* Grundfarben */
+  --weiss: #ffffff;
+  --text: #1f2937;
+  --text-leise: #6b7280;
+  --linie: #e5e7eb;
+
+  /* Farben mit Bedeutung (nur für Fehler, Warnungen und Erfolg) */
+  --fehler: #b91c1c;
+  --fehler-dunkel: #991b1b;
+  --fehler-flaeche: #fef2f2;
+  --warnung: #92400e;
+  --warnung-flaeche: #fffbeb;
+  --erfolg: #15803d;
+
+  /* Schatten und Abdunkelung hinter Dialogen */
+  --schatten: 0 1px 3px rgb(0 0 0 / 8%);
+  --schatten-gross: 0 8px 24px rgb(0 0 0 / 12%);
+  --abdunkeln: rgb(31 41 55 / 40%);
+
+  /* Abstände im 4er/8er-Raster */
+  --abstand-1: 4px;
+  --abstand-2: 8px;
+  --abstand-3: 12px;
+  --abstand-4: 16px;
+  --abstand-5: 24px;
+  --abstand-6: 32px;
+
+  /* Ecken */
+  --radius-klein: 8px;
+  --radius-gross: 12px;
+  --radius-rund: 999px;
+
+  /* Schrift */
+  --schrift: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --schrift-fest: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --groesse-klein: 13px;
+  --groesse-normal: 15px;
+  --groesse-gross: 17px;
+  --groesse-titel: 20px;
+
+  --uebergang: 150ms ease;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --hintergrund: #15181e;
-    --flaeche: #1d2129;
-    --flaeche-2: #262b35;
-    --text: #e6e9ef;
-    --text-leise: #9aa3b5;
-    --rand: #323844;
-    --akzent: #4fbf9f;
-    --akzent-text: #0d1f1a;
-    --warnung: #f0b35a;
-    --warnung-flaeche: #3a2c14;
-    --fehler: #ff8a80;
-    --erfolg: #7fd69a;
-  }
+:root {
+  color-scheme: light;
+  font-family: var(--schrift);
+  font-size: var(--groesse-normal);
+  line-height: 1.5;
 }
 
 * {
@@ -44,7 +74,7 @@ body {
 
 body {
   margin: 0;
-  background: var(--hintergrund);
+  background: var(--weiss);
   color: var(--text);
 }
 
@@ -53,27 +83,47 @@ body {
 }
 
 h1 {
-  font-size: 1.3rem;
-  margin: 0 0 1rem;
+  font-size: var(--groesse-titel);
+  margin: 0 0 var(--abstand-2);
+  color: var(--blau);
 }
 
 h2 {
-  font-size: 1.15rem;
-  margin: 0 0 0.75rem;
+  font-size: var(--groesse-gross);
+  margin: 0 0 var(--abstand-3);
 }
+
+h3 {
+  font-size: var(--groesse-normal);
+  margin: 0 0 var(--abstand-2);
+}
+
+:focus-visible {
+  outline: 2px solid var(--blau);
+  outline-offset: 2px;
+}
+
+/* Knöpfe: Zweitknopf weiss mit blauem Rahmen, Hauptknopf blau */
 
 button {
   font: inherit;
-  padding: 0.4rem 0.8rem;
-  border: 1px solid var(--rand);
-  border-radius: 6px;
-  background: var(--flaeche);
-  color: var(--text);
+  padding: var(--abstand-2) var(--abstand-4);
+  border: 1px solid var(--blau);
+  border-radius: var(--radius-klein);
+  background: var(--weiss);
+  color: var(--blau);
   cursor: pointer;
+  transition:
+    background-color var(--uebergang),
+    border-color var(--uebergang),
+    color var(--uebergang),
+    box-shadow var(--uebergang);
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--akzent);
+  background: var(--blau-hell);
+  border-color: var(--blau-dunkel);
+  color: var(--blau-dunkel);
 }
 
 button:disabled {
@@ -82,83 +132,136 @@ button:disabled {
 }
 
 button.haupt {
-  background: var(--akzent);
-  border-color: var(--akzent);
-  color: var(--akzent-text);
+  background: var(--blau);
+  border-color: var(--blau);
+  color: var(--weiss);
+}
+
+button.haupt:hover:not(:disabled) {
+  background: var(--blau-dunkel);
+  border-color: var(--blau-dunkel);
+  color: var(--weiss);
 }
 
 button.gefahr {
+  border-color: var(--fehler);
   color: var(--fehler);
+}
+
+button.gefahr:hover:not(:disabled) {
+  background: var(--fehler-flaeche);
+  border-color: var(--fehler-dunkel);
+  color: var(--fehler-dunkel);
 }
 
 button.haupt.gefahr,
 .warnung button.gefahr {
   background: var(--fehler);
   border-color: var(--fehler);
-  color: #fff;
+  color: var(--weiss);
+}
+
+button.haupt.gefahr:hover:not(:disabled),
+.warnung button.gefahr:hover:not(:disabled) {
+  background: var(--fehler-dunkel);
+  border-color: var(--fehler-dunkel);
+  color: var(--weiss);
 }
 
 button.klein {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.85rem;
+  padding: var(--abstand-1) var(--abstand-3);
+  font-size: var(--groesse-klein);
 }
 
 button.breit {
   width: 100%;
 }
 
+/* Eingabefelder */
+
 input,
 select,
 textarea {
   font: inherit;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--rand);
-  border-radius: 6px;
-  background: var(--flaeche);
+  padding: var(--abstand-2) var(--abstand-3);
+  border: 1px solid var(--linie);
+  border-radius: var(--radius-klein);
+  background: var(--weiss);
   color: var(--text);
   width: 100%;
+  transition:
+    border-color var(--uebergang),
+    box-shadow var(--uebergang);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--blau-rand);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--blau);
+  box-shadow: 0 0 0 3px var(--blau-rand);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--blau);
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--blau);
 }
 
 textarea {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 0.8rem;
+  resize: vertical;
 }
+
+/* Grundaufbau: Seitenleiste, Mailliste, Leseansicht */
 
 .layout {
   display: grid;
-  grid-template-columns: 250px minmax(280px, 380px) 1fr;
+  grid-template-columns: 256px minmax(280px, 384px) 1fr;
   grid-template-rows: 1fr auto;
   height: 100%;
 }
 
 .seitenleiste {
   grid-row: 1;
-  border-right: 1px solid var(--rand);
-  background: var(--flaeche);
-  padding: 1rem;
+  border-right: 1px solid var(--linie);
+  padding: var(--abstand-4);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--abstand-3);
 }
 
 .mailliste {
   grid-row: 1;
-  border-right: 1px solid var(--rand);
+  border-right: 1px solid var(--linie);
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: var(--abstand-2);
 }
 
 .lesebereich {
   grid-row: 1;
   overflow: auto;
-  padding: 1rem 1.5rem;
-  background: var(--flaeche);
+  padding: var(--abstand-4) var(--abstand-5);
 }
 
 .statusleiste {
   grid-column: 1 / -1;
   grid-row: 2;
+  border-top: 1px solid var(--linie);
 }
 
 .statusleiste:empty {
@@ -168,20 +271,31 @@ textarea {
 .verbindung-getrennt {
   background: var(--warnung-flaeche);
   color: var(--warnung);
-  padding: 0.35rem 1rem;
-  font-size: 0.9rem;
+  padding: var(--abstand-2) var(--abstand-4);
+  font-size: var(--groesse-klein);
 }
+
+.meldung {
+  background: var(--blau-hell);
+  color: var(--text);
+  padding: var(--abstand-2) var(--abstand-4);
+  font-size: var(--groesse-klein);
+}
+
+/* Konten und Ordner */
 
 nav.konten {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--abstand-3);
 }
 
 .konto {
-  padding: 0.5rem;
-  border: 1px solid var(--rand);
-  border-radius: 8px;
+  padding: var(--abstand-3);
+  border-radius: var(--radius-gross);
+  background: var(--weiss);
+  box-shadow: var(--schatten);
+  border: 1px solid var(--linie);
 }
 
 .konto-name {
@@ -191,25 +305,31 @@ nav.konten {
 .konto-adresse,
 .leise {
   color: var(--text-leise);
-  font-size: 0.9rem;
+  font-size: var(--groesse-klein);
 }
 
 .klein-text {
-  font-size: 0.85rem;
+  font-size: var(--groesse-klein);
 }
 
 .konto-knoepfe {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.4rem;
+  gap: var(--abstand-2);
+  margin-top: var(--abstand-2);
 }
 
 ul.ordner,
 ul.mails {
   list-style: none;
-  margin: 0.4rem 0 0;
+  margin: var(--abstand-2) 0 0;
   padding: 0;
+}
+
+ul.ordner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .ordner-knopf {
@@ -217,12 +337,21 @@ ul.mails {
   text-align: left;
   border: none;
   background: none;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  color: var(--text);
+  padding: var(--abstand-1) var(--abstand-2);
+  padding-left: calc(var(--abstand-2) + var(--tiefe, 0) * var(--abstand-4));
+  border-radius: var(--radius-klein);
 }
 
-.ordner-knopf.gewaehlt {
-  background: var(--flaeche-2);
+.ordner-knopf:hover:not(:disabled) {
+  background: var(--blau-hell);
+  color: var(--text);
+}
+
+.ordner-knopf.gewaehlt,
+.ordner-knopf.gewaehlt:hover:not(:disabled) {
+  background: var(--blau-hell);
+  color: var(--blau-dunkel);
   font-weight: 600;
 }
 
@@ -232,26 +361,42 @@ ul.mails {
   opacity: 1;
 }
 
+/* Mailliste */
+
+ul.mails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 button.mail {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 0.1rem 0.5rem;
+  gap: 2px var(--abstand-2);
   width: 100%;
   text-align: left;
   border: none;
-  border-bottom: 1px solid var(--rand);
-  border-radius: 0;
+  border-radius: var(--radius-klein);
   background: none;
-  padding: 0.5rem;
+  color: var(--text);
+  padding: var(--abstand-2) var(--abstand-3);
 }
 
-button.mail.offen {
-  background: var(--flaeche-2);
+button.mail:hover:not(:disabled) {
+  background: var(--blau-hell);
+  color: var(--text);
+}
+
+button.mail.offen,
+button.mail.offen:hover:not(:disabled) {
+  background: var(--blau-hell);
+  box-shadow: inset 3px 0 0 var(--blau);
 }
 
 button.mail.ungelesen .mail-absender,
 button.mail.ungelesen .mail-betreff {
   font-weight: 700;
+  color: var(--text);
 }
 
 .mail-absender,
@@ -266,43 +411,54 @@ button.mail.ungelesen .mail-betreff {
   color: var(--text-leise);
 }
 
+/* Auf hellblauem Grund reicht der Kontrast von Nebentext nicht ganz: dunkler setzen. */
+button.mail:hover .mail-betreff,
+button.mail:hover .mail-datum,
+button.mail.offen .mail-betreff,
+button.mail.offen .mail-datum {
+  color: var(--text);
+}
+
 .mail-datum {
   color: var(--text-leise);
-  font-size: 0.85rem;
+  font-size: var(--groesse-klein);
 }
 
 .hinweis-leiste {
   background: var(--warnung-flaeche);
   color: var(--warnung);
-  border-radius: 6px;
-  padding: 0.5rem;
-  font-size: 0.9rem;
+  border-radius: var(--radius-gross);
+  padding: var(--abstand-2) var(--abstand-3);
+  font-size: var(--groesse-klein);
 }
+
+/* Leseansicht */
 
 .lesen .werkzeuge {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--abstand-2);
   flex-wrap: wrap;
-  margin-bottom: 1rem;
+  align-items: center;
+  margin-bottom: var(--abstand-4);
 }
 
 .lesen select.klein {
   width: auto;
-  padding: 0.2rem 0.4rem;
-  font-size: 0.85rem;
+  padding: var(--abstand-1) var(--abstand-2);
+  font-size: var(--groesse-klein);
 }
 
 .lesen .betreff {
-  font-size: 1.3rem;
+  font-size: var(--groesse-titel);
   overflow-wrap: anywhere;
 }
 
 dl.kopfdaten {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.2rem 1rem;
-  margin: 0 0 1rem;
-  font-size: 0.9rem;
+  gap: var(--abstand-1) var(--abstand-4);
+  margin: 0 0 var(--abstand-4);
+  font-size: var(--groesse-klein);
 }
 
 dl.kopfdaten dt {
@@ -316,18 +472,86 @@ dl.kopfdaten dd {
 
 .willkommen {
   max-width: 34rem;
+  padding: var(--abstand-5);
+  border-radius: var(--radius-gross);
+  background: var(--blau-hell);
 }
 
 .fehler {
   color: var(--fehler);
 }
 
+.extern-leiste {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--abstand-2);
+  background: var(--warnung-flaeche);
+  color: var(--warnung);
+  border-radius: var(--radius-gross);
+  padding: var(--abstand-2) var(--abstand-3);
+  margin-bottom: var(--abstand-3);
+  font-size: var(--groesse-klein);
+}
+
+iframe.mail-rahmen {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid var(--linie);
+  border-radius: var(--radius-gross);
+  background: var(--weiss);
+}
+
+.mailtext {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--schrift-fest);
+  font-size: var(--groesse-klein);
+  line-height: 1.5;
+}
+
+.mailtext a {
+  color: var(--blau);
+  cursor: pointer;
+}
+
+.anhang-bereich {
+  margin-top: var(--abstand-4);
+  border-top: 1px solid var(--linie);
+  padding-top: var(--abstand-3);
+}
+
+ul.anhaenge {
+  list-style: none;
+  margin: var(--abstand-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--abstand-2);
+}
+
+ul.anhaenge li {
+  display: flex;
+  align-items: center;
+  gap: var(--abstand-3);
+  flex-wrap: wrap;
+}
+
+.anhang-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Dialoge */
+
 dialog {
-  border: 1px solid var(--rand);
-  border-radius: 10px;
-  background: var(--flaeche);
+  border: none;
+  border-radius: var(--radius-gross);
+  background: var(--weiss);
   color: var(--text);
-  padding: 1.25rem;
+  box-shadow: var(--schatten-gross);
+  padding: var(--abstand-5);
   max-width: min(640px, 95vw);
   width: 100%;
   max-height: 92vh;
@@ -335,7 +559,7 @@ dialog {
 }
 
 dialog::backdrop {
-  background: rgb(0 0 0 / 40%);
+  background: var(--abdunkeln);
 }
 
 dialog.bestaetigen {
@@ -343,7 +567,11 @@ dialog.bestaetigen {
 }
 
 dialog.warnung h2 {
-  color: var(--warnung);
+  color: var(--fehler);
+}
+
+dialog.verfassen-dialog {
+  max-width: min(820px, 96vw);
 }
 
 .vorformatiert {
@@ -354,13 +582,13 @@ dialog.warnung h2 {
 .feld {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  margin-bottom: 0.6rem;
+  gap: var(--abstand-1);
+  margin-bottom: var(--abstand-3);
   flex: 1;
 }
 
 .beschriftung {
-  font-size: 0.85rem;
+  font-size: var(--groesse-klein);
   color: var(--text-leise);
 }
 
@@ -370,42 +598,53 @@ dialog.warnung h2 {
 
 .zeile {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--abstand-3);
   align-items: flex-end;
 }
 
 .zeile.mit-knopf > button {
-  margin-bottom: 0.6rem;
+  margin-bottom: var(--abstand-3);
   white-space: nowrap;
 }
 
 fieldset.server {
-  border: 1px solid var(--rand);
-  border-radius: 8px;
-  margin: 0.5rem 0 0.75rem;
-  padding: 0.5rem 0.75rem 0.25rem;
+  border: 1px solid var(--linie);
+  border-radius: var(--radius-gross);
+  margin: var(--abstand-2) 0 var(--abstand-3);
+  padding: var(--abstand-2) var(--abstand-4) var(--abstand-1);
+}
+
+fieldset.server legend {
+  padding: 0 var(--abstand-1);
+  font-weight: 600;
 }
 
 details.zertifikat {
-  margin-bottom: 0.6rem;
-  font-size: 0.9rem;
+  margin-bottom: var(--abstand-3);
+  font-size: var(--groesse-klein);
 }
 
 details.zertifikat summary {
   cursor: pointer;
-  color: var(--text-leise);
+  color: var(--blau);
+  border-radius: var(--radius-klein);
+}
+
+details.zertifikat textarea {
+  font-family: var(--schrift-fest);
+  font-size: var(--groesse-klein);
 }
 
 p.warnung {
   background: var(--warnung-flaeche);
   color: var(--warnung);
-  border-radius: 6px;
-  padding: 0.5rem;
+  border-radius: var(--radius-gross);
+  padding: var(--abstand-2) var(--abstand-3);
 }
 
 .status {
   white-space: pre-wrap;
-  min-height: 1.4em;
+  min-height: 1.5em;
 }
 
 .status[data-art="fehler"] {
@@ -419,151 +658,52 @@ p.warnung {
 .knoepfe {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  flex-wrap: wrap;
+  gap: var(--abstand-2);
+  margin-top: var(--abstand-4);
 }
 
 .umschalter {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  font-size: 0.85rem;
+  gap: var(--abstand-2);
+  font-size: var(--groesse-klein);
   color: var(--text-leise);
 }
 
-.umschalter input {
-  width: auto;
-}
-
-.extern-leiste {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  background: var(--warnung-flaeche);
-  color: var(--warnung);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-}
-
-iframe.mail-rahmen {
-  display: block;
-  width: 100%;
-  min-height: 120px;
-  border: 1px solid var(--rand);
-  border-radius: 6px;
-  background: #fff;
-}
-
-.mailtext {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-.mailtext a {
-  color: var(--akzent);
-  cursor: pointer;
-}
-
-.anhang-bereich {
-  margin-top: 1rem;
-  border-top: 1px solid var(--rand);
-  padding-top: 0.75rem;
-}
-
-.anhang-bereich h3 {
-  font-size: 1rem;
-  margin: 0 0 0.25rem;
-}
-
-ul.anhaenge {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-ul.anhaenge li {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.anhang-name {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.einstellung {
-  border-top: 1px solid var(--rand);
-  padding: 0.75rem 0;
-}
-
-.einstellung h3 {
-  font-size: 1rem;
-  margin: 0 0 0.5rem;
-}
-
 .umschalter.gross {
-  font-size: 1rem;
+  font-size: var(--groesse-normal);
   color: var(--text);
 }
 
-ul.absender-liste {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+.einstellung {
+  border-top: 1px solid var(--linie);
+  padding: var(--abstand-3) 0;
 }
 
-ul.absender-liste li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.meldung {
-  background: var(--flaeche-2);
-  padding: 0.35rem 1rem;
-  font-size: 0.9rem;
-}
-
-dialog.verfassen-dialog {
-  max-width: min(820px, 96vw);
-}
-
-dialog.verfassen-dialog textarea[name="text"] {
-  font-family: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
-}
-
+ul.absender-liste,
 ul.entwurf-liste {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--abstand-2);
+}
+
+ul.absender-liste li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--abstand-2);
 }
 
 ul.entwurf-liste li {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 0.1rem 0.75rem;
-  border-bottom: 1px solid var(--rand);
-  padding-bottom: 0.4rem;
+  gap: 2px var(--abstand-3);
+  border-bottom: 1px solid var(--linie);
+  padding-bottom: var(--abstand-2);
 }
 
 .entwurf-betreff {
@@ -574,6 +714,45 @@ ul.entwurf-liste li {
   grid-column: 2;
   grid-row: 1 / span 2;
   display: flex;
-  gap: 0.4rem;
+  gap: var(--abstand-2);
   align-items: center;
+}
+
+/* Schmale Fenster: Spalten werden schmaler, ganz schmal untereinander */
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 208px minmax(240px, 320px) 1fr;
+  }
+
+  .lesebereich {
+    padding: var(--abstand-4);
+  }
+}
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+    height: auto;
+    min-height: 100%;
+  }
+
+  .seitenleiste,
+  .mailliste,
+  .lesebereich,
+  .statusleiste {
+    grid-row: auto;
+    border-right: none;
+  }
+
+  .seitenleiste,
+  .mailliste {
+    border-bottom: 1px solid var(--linie);
+    max-height: none;
+  }
+
+  .zeile {
+    flex-wrap: wrap;
+  }
 }

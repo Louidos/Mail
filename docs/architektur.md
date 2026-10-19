@@ -120,3 +120,11 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 - **Entwürfe** liegen im Zwischenspeicher (`MailCache`): in SQLCipher (`entwuerfe`) oder im Arbeitsspeicher.
   Anhänge werden mit ihrer Quelle gespeichert und beim Laden neu ins Register eingetragen. „Lokalen Speicher leeren“
   lässt Entwürfe stehen; beim Umschalten des Speichers werden sie übernommen.
+
+## Design der Oberfläche
+
+Alle Farben, Abstände, Radien, Schatten und Schriftgrössen stehen zentral als CSS-Variablen
+am Anfang von `src/styles.css` (Hauptfarbe `#2563EB` auf Weiss, Ecken 8px für Knöpfe und
+Felder, 12px für Karten und Dialoge, Abstände im 4er/8er-Raster). Im übrigen Code werden
+keine festen Farbwerte verwendet; `tests/design.test.ts` prüft das. Die Mailanzeige im
+iframe übernimmt ihre Grundfarben beim Aufbau aus diesen Variablen.
