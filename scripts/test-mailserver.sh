@@ -37,7 +37,7 @@ start() {
     -p 127.0.0.1:3025:3025 -p 127.0.0.1:3143:3143 \
     -p 127.0.0.1:3465:3465 -p 127.0.0.1:3993:3993 \
     -v "$ORDNER:/zertifikat:ro" \
-    -e GREENMAIL_OPTS="-Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.smtps -Dgreenmail.setup.test.imap -Dgreenmail.setup.test.imaps -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.tls.keystore.file=/zertifikat/keystore.p12 -Dgreenmail.tls.keystore.password=$PASSWORT_KEYSTORE -Dgreenmail.auth.disabled=false -Dgreenmail.users=test:testpasswort@localhost,empfaenger:testpasswort@localhost" \
+    -e GREENMAIL_OPTS="-Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.smtps -Dgreenmail.setup.test.imap -Dgreenmail.setup.test.imaps -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.tls.keystore.file=/zertifikat/keystore.p12 -Dgreenmail.tls.keystore.password=$PASSWORT_KEYSTORE -Dgreenmail.users=test:testpasswort@localhost,empfaenger:testpasswort@localhost" \
     "$IMAGE" >/dev/null
 
   # Warten, bis IMAP über TLS antwortet.

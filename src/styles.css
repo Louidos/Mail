@@ -4,29 +4,42 @@
   font-size: 15px;
   --hintergrund: #f6f7f9;
   --flaeche: #ffffff;
+  --flaeche-2: #eef1f5;
   --text: #1d2330;
   --text-leise: #5b6475;
   --rand: #d9dde5;
   --akzent: #1f6f5c;
-  --warnung: #9a5b00;
+  --akzent-text: #ffffff;
+  --warnung: #8a5300;
+  --warnung-flaeche: #fff4e0;
   --fehler: #b3261e;
+  --erfolg: #1f6f3a;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --hintergrund: #15181e;
     --flaeche: #1d2129;
+    --flaeche-2: #262b35;
     --text: #e6e9ef;
     --text-leise: #9aa3b5;
     --rand: #323844;
     --akzent: #4fbf9f;
-    --warnung: #e0a040;
+    --akzent-text: #0d1f1a;
+    --warnung: #f0b35a;
+    --warnung-flaeche: #3a2c14;
     --fehler: #ff8a80;
+    --erfolg: #7fd69a;
   }
 }
 
 * {
   box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
@@ -36,5 +49,238 @@ body {
 }
 
 #app {
+  height: 100%;
+}
+
+h1 {
+  font-size: 1.3rem;
+  margin: 0 0 1rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin: 0 0 0.75rem;
+}
+
+button {
+  font: inherit;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: var(--flaeche);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--akzent);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+button.haupt {
+  background: var(--akzent);
+  border-color: var(--akzent);
+  color: var(--akzent-text);
+}
+
+button.gefahr {
+  color: var(--fehler);
+}
+
+button.haupt.gefahr,
+.warnung button.gefahr {
+  background: var(--fehler);
+  border-color: var(--fehler);
+  color: #fff;
+}
+
+button.klein {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+button.breit {
+  width: 100%;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: var(--flaeche);
+  color: var(--text);
+  width: 100%;
+}
+
+textarea {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100%;
+}
+
+.seitenleiste {
+  border-right: 1px solid var(--rand);
+  background: var(--flaeche);
   padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.inhalt {
+  padding: 1.5rem;
+  overflow: auto;
+}
+
+ul.konten {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.konto {
+  padding: 0.5rem;
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+}
+
+.konto-name {
+  font-weight: 600;
+}
+
+.konto-adresse,
+.leise {
+  color: var(--text-leise);
+  font-size: 0.9rem;
+}
+
+.konto-knoepfe {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.willkommen {
+  max-width: 34rem;
+}
+
+.fehler {
+  color: var(--fehler);
+}
+
+dialog {
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: var(--flaeche);
+  color: var(--text);
+  padding: 1.25rem;
+  max-width: min(640px, 95vw);
+  width: 100%;
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+dialog.bestaetigen {
+  max-width: 460px;
+}
+
+dialog.warnung h2 {
+  color: var(--warnung);
+}
+
+.vorformatiert {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.feld {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+  flex: 1;
+}
+
+.beschriftung {
+  font-size: 0.85rem;
+  color: var(--text-leise);
+}
+
+.hinweis {
+  color: var(--text-leise);
+}
+
+.zeile {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.zeile.mit-knopf > button {
+  margin-bottom: 0.6rem;
+  white-space: nowrap;
+}
+
+fieldset.server {
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.5rem 0.75rem 0.25rem;
+}
+
+details.zertifikat {
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+}
+
+details.zertifikat summary {
+  cursor: pointer;
+  color: var(--text-leise);
+}
+
+p.warnung {
+  background: var(--warnung-flaeche);
+  color: var(--warnung);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.status {
+  white-space: pre-wrap;
+  min-height: 1.4em;
+}
+
+.status[data-art="fehler"] {
+  color: var(--fehler);
+}
+
+.status[data-art="erfolg"] {
+  color: var(--erfolg);
+}
+
+.knoepfe {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }

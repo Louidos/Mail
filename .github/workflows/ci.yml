@@ -61,6 +61,13 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: cargo test
+      - name: Test-Mailserver starten (GreenMail)
+        run: scripts/test-mailserver.sh start
+
+      - name: cargo test (inklusive Integrationstests gegen den Test-Mailserver)
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test -- --include-ignored
+
+      - name: Test-Mailserver stoppen
+        if: always()
+        run: scripts/test-mailserver.sh stop
