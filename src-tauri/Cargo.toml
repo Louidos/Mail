@@ -50,6 +50,7 @@ panic = "abort"
 strip = true
 
 [dev-dependencies]
+tokio = { version = "1.53.3", features = ["test-util"] }
 rcgen = "0.14"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }

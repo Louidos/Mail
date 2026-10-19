@@ -58,7 +58,7 @@ pub async fn verbinden(server: &ServerEinstellung) -> Result<SmtpVerbindung, Ver
             tls: tls::tls_starten(tcp, &server.host, angeheftet).await?,
         }),
         Verschluesselung::Starttls => {
-            let tcp = starttls_aushandeln(tcp).await?;
+            let tcp = tls::aushandeln_mit_zeitlimit(starttls_aushandeln(tcp)).await?;
             Box::new(SmtpStrom {
                 // lettre erwartet eine Begrüssung; nach STARTTLS sendet der Server keine
                 // neue. Deshalb wird hier eine eingesetzt, danach folgt EHLO über TLS.

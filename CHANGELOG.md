@@ -10,6 +10,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 ### Behoben
 
 - Eine präparierte Mail mit vielen Verweisen auf dasselbe Bild kann SicherMail beim Öffnen nicht mehr durch vollen Arbeitsspeicher zum Absturz bringen (#22)
+- Bei STARTTLS-Verbindungen kann eine Gegenstelle im Netz SicherMail vor dem Start der Verschlüsselung nicht mehr endlos hinhalten oder den Speicher füllen; nach spätestens 60 Sekunden wird abgebrochen (#23)
 
 ## 0.1.1 – 2026-10-19
 

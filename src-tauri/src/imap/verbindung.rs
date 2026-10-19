@@ -44,7 +44,7 @@ pub async fn verbinden(
             Ok(client)
         }
         Verschluesselung::Starttls => {
-            let tcp = starttls_aushandeln(tcp).await?;
+            let tcp = tls::aushandeln_mit_zeitlimit(starttls_aushandeln(tcp)).await?;
             let strom = tls::tls_starten(tcp, &server.host, angeheftet).await?;
             Ok(async_imap::Client::new(strom))
         }
