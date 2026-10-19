@@ -62,6 +62,12 @@ describe("linkPruefen", () => {
     expect(linkPruefen("\u202epaypal.com", ziel)).toMatch(/Phishing/);
   });
 
+  it("bricht bei fehlerhaft kodierten mailto-Links nicht ab", () => {
+    expect(() => linkPruefen("Schreiben", "mailto:a%E0@example.org")).not.toThrow();
+    expect(linkPruefen("anna@example.org", "mailto:boese%E0@example.net")).toMatch(/boese%e0@example.net/);
+    expect(linkPruefen("https://bank.ch", "mailto:%zz")).toMatch(/schreibt aber eine Mail/);
+  });
+
   it("warnt, wenn eine Webadresse in Wahrheit eine Mail schreibt", () => {
     expect(linkPruefen("https://bank.ch", "mailto:boese@example.net")).toMatch(/schreibt aber eine Mail/);
   });

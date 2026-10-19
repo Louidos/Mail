@@ -15,6 +15,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 - Ordner mit sehr hohen oder ungültigen Mailnummern (UID) werden wieder abgeglichen, statt hängen zu bleiben (#26)
 - Scheitert das Löschen eines Kontos (z. B. weil der Schlüsselbund gesperrt ist), kommen für dieses Konto weiterhin neue Mails an (#27)
 - Scheitert das Löschen eines Entwurfs, zeigt die Entwürfe-Liste jetzt eine Meldung an (#28)
+- Ein Klick auf einen Mail-Link (mailto) mit fehlerhafter Kodierung bewirkt nicht mehr einfach nichts, sondern wird normal geprüft und geöffnet (#29)
 
 ## 0.1.1 – 2026-10-19
 
