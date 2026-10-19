@@ -7,6 +7,10 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+### Behoben
+
+- Eine präparierte Mail mit vielen Verweisen auf dasselbe Bild kann SicherMail beim Öffnen nicht mehr durch vollen Arbeitsspeicher zum Absturz bringen (#22)
+
 ## 0.1.1 – 2026-10-19
 
 ### Behoben
