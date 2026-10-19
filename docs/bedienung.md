@@ -1,8 +1,13 @@
 # Bedienung
 
-## Programm starten
+## Programm installieren und starten
 
-Siehe [README](../README.md#start).
+Fertige Installationspakete für Windows, macOS und Linux hängen an jedem
+[Release](https://github.com/Louidos/Mail/releases). Wie du sie herunterlädst, Prüfsumme und Herkunft prüfst und
+was bei Warnungen wegen fehlender Signatur zu tun ist, steht im [README unter „Installation“](../README.md#installation).
+Nach der Installation startest du SicherMail wie jedes andere Programm.
+
+Zum Starten aus dem Quellcode siehe [README](../README.md#start).
 
 ## Konto einrichten
 

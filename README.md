@@ -27,6 +27,7 @@ Version: **0.3.0** (siehe [Releases](https://github.com/Louidos/Mail/releases))
 - [x] Absender prüfen (DKIM/SPF/DMARC des eigenen Servers anzeigen, vor Fälschungen warnen)
 - [x] Ende-zu-Ende-Verschlüsselung mit OpenPGP
 - [x] Dunkle Darstellung (automatisch oder von Hand)
+- [x] Fertige Installationspakete für Windows, macOS und Linux in jedem Release
 
 Änderungen stehen im [CHANGELOG](CHANGELOG.md).
 
@@ -42,7 +43,6 @@ Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
 **Geplant:**
 
 - [ ] S/MIME-Verschlüsselung und -Signatur, Folge von #44 ([#56](https://github.com/Louidos/Mail/issues/56))
-- [ ] Fertige Installationspakete für Windows, macOS und Linux in jedem Release ([#48](https://github.com/Louidos/Mail/issues/48))
 - [ ] Suche in Mails ([#49](https://github.com/Louidos/Mail/issues/49))
 - [ ] Gemeinsamer Posteingang für mehrere Konten ([#50](https://github.com/Louidos/Mail/issues/50))
 
@@ -51,6 +51,58 @@ Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
 - POP3 und Exchange/EWS – SicherMail spricht nur IMAP und SMTP.
 - Telemetrie, Absturzberichte und automatische Update-Abfragen.
 - Fremddienste (zentrale Konfigurationsdatenbanken, Cloud-Dienste); verbunden wird nur mit den eigenen Servern.
+
+## Installation
+
+Ab Version 0.4.0 hängen an jedem [Release](https://github.com/Louidos/Mail/releases) fertige
+Installationspakete. Selbst bauen ist nicht nötig.
+
+| System                               | Datei                                                    |
+| ------------------------------------ | -------------------------------------------------------- |
+| Windows 10/11 (64 Bit)               | `SicherMail_X.Y.Z_x64_en-US.msi` oder `SicherMail_X.Y.Z_x64-setup.exe` |
+| macOS (Apple Silicon und Intel)      | `SicherMail_X.Y.Z_universal.dmg`                         |
+| Linux, Debian/Ubuntu                 | `SicherMail_X.Y.Z_amd64.deb` (`sudo apt install ./SicherMail_X.Y.Z_amd64.deb`) |
+| Linux, Fedora/openSUSE               | `SicherMail-X.Y.Z-1.x86_64.rpm` (`sudo dnf install ./SicherMail-X.Y.Z-1.x86_64.rpm`) |
+| Linux, andere                        | `SicherMail_X.Y.Z_amd64.AppImage` (ausführbar machen: `chmod +x`, dann starten) |
+
+SicherMail fragt nie selbst nach Updates. Neue Versionen stehen unter Releases; installiert wird von Hand.
+
+### Prüfsumme und Herkunft prüfen
+
+Lade zusätzlich `SHA256SUMS.txt` aus demselben Release herunter und vergleiche die Prüfsumme deines Pakets:
+
+```sh
+# Linux
+sha256sum --check --ignore-missing SHA256SUMS.txt
+# macOS
+shasum -a 256 SicherMail_X.Y.Z_universal.dmg     # Ausgabe mit der Zeile in SHA256SUMS.txt vergleichen
+```
+
+```powershell
+# Windows (PowerShell)
+Get-FileHash .\SicherMail_X.Y.Z_x64_en-US.msi -Algorithm SHA256   # mit der Zeile in SHA256SUMS.txt vergleichen
+```
+
+Ob ein Paket wirklich vom Release-Workflow dieses Repos gebaut wurde, zeigt der Herkunftsnachweis
+(braucht die [GitHub CLI](https://cli.github.com/), auf allen drei Systemen gleich):
+
+```sh
+gh attestation verify SicherMail_X.Y.Z_universal.dmg --repo Louidos/Mail
+```
+
+### Warnungen bei unsignierten Paketen
+
+Solange im Release-Text nichts anderes steht, sind die Pakete **nicht mit einem Entwicklerzertifikat signiert**.
+Prüfsumme und Herkunftsnachweis ersetzen die Signatur; prüfe sie, bevor du die Warnung übergehst.
+
+- **macOS (Gatekeeper):** „SicherMail“ kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann.
+  SicherMail aus der `.dmg` in „Programme“ ziehen, dann mit Ctrl-Klick (Rechtsklick) auf SicherMail → **Öffnen** →
+  **Öffnen**. Ab macOS 15: einmal öffnen versuchen, dann unter **Systemeinstellungen → Datenschutz & Sicherheit**
+  bei SicherMail auf **Dennoch öffnen** klicken.
+- **Windows (SmartScreen):** „Der Computer wurde durch Windows geschützt“ → **Weitere Informationen** →
+  **Trotzdem ausführen**. SicherMail braucht die WebView2-Laufzeit von Microsoft; sie ist bei Windows 10/11
+  meist schon vorhanden, sonst lädt das Installationsprogramm sie nach.
+- **Linux:** Die Pakete sind nicht signiert; `apt`/`dnf` installieren lokale Dateien trotzdem.
 
 ## Installation für Entwicklung
 
@@ -76,7 +128,7 @@ npm ci
 
 ```sh
 npm run tauri dev      # Programm im Entwicklungsmodus starten
-npm run tauri build    # Installationspaket bauen
+npm run tauri build    # Installationspaket selbst bauen (für Releases baut es die CI)
 ```
 
 ## Tests und Prüfungen
@@ -112,7 +164,7 @@ Getestet wird nie gegen echte Postfächer.
 | `tests/integration/`  | Rust-Integrationstests, u. a. gegen den Test-Mailserver (je Datei ein `[[test]]` in `src-tauri/Cargo.toml`) |
 | `docs/`               | Doku: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Sicherheit](docs/sicherheit.md) |
 | `scripts/`            | Hilfsskripte ([`test-mailserver.sh`](scripts/test-mailserver.sh) für GreenMail)                 |
-| `.github/`            | CI- und Release-Workflow, Vorlagen für Issues und Pull Requests                                |
+| `.github/`            | CI-, Paket- und Release-Workflow, Vorlagen für Issues und Pull Requests                        |
 
 Mehr zum Aufbau des Backends steht in der [Architektur](docs/architektur.md).
 
@@ -134,7 +186,9 @@ Mehr zum Aufbau des Backends steht in der [Architektur](docs/architektur.md).
   Funktionen, MAJOR für Inkompatibles. Release: Branch `release/X.Y.Z`, Version in `package.json`,
   `src-tauri/Cargo.toml` (+ `Cargo.lock`), `src-tauri/tauri.conf.json`, CHANGELOG und README setzen, Commit
   `chore: Version X.Y.Z`, PR und Squash-Merge; danach Tag `vX.Y.Z` auf `main`. Der
-  [Release-Workflow](.github/workflows/release.yml) erstellt dann das GitHub-Release mit dem CHANGELOG-Abschnitt.
+  [Release-Workflow](.github/workflows/release.yml) baut dann die Installationspakete
+  ([`pakete.yml`](.github/workflows/pakete.yml)) und erstellt das GitHub-Release mit dem CHANGELOG-Abschnitt,
+  den Paketen, `SHA256SUMS.txt` und Herkunftsnachweis.
   Tags werden nie verschoben oder gelöscht.
 
 ## Sicherheit

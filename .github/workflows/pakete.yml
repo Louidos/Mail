@@ -1,0 +1,177 @@
+name: Pakete
+
+# Baut die Installationspakete für Windows, macOS und Linux (#48):
+# - aus dem Release-Workflow (`release.yml`) für genau den Commit des Releases,
+# - in Pull Requests, die diesen Workflow, den Release-Workflow oder die Tauri-Konfiguration
+#   ändern, damit der Bau schon vor dem Merge geprüft wird.
+# Die Pakete landen als Artefakte im Lauf; veröffentlicht werden sie nur von `release.yml`.
+#
+# Reproduzierbarkeit: gesperrte Lockfiles (`npm ci`, `cargo --locked`), Rust-Version aus
+# `rust-version` in `src-tauri/Cargo.toml`, Actions auf Commits festgelegt, kein Build-Cache,
+# `SOURCE_DATE_EPOCH` aus dem Zeitpunkt des Commits.
+#
+# Signieren: nur wenn die passenden Secrets gesetzt sind (macOS: APPLE_CERTIFICATE,
+# APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, für die Notarisierung zusätzlich
+# APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID; Windows: WINDOWS_CERTIFICATE als Base64-PFX und
+# WINDOWS_CERTIFICATE_PASSWORD). Sonst werden die Pakete unsigniert gebaut.
+on:
+  workflow_call:
+    inputs:
+      commit:
+        description: "Commit, aus dem gebaut wird"
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/pakete.yml
+      - .github/workflows/release.yml
+      - src-tauri/tauri.conf.json
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bauen:
+    name: Pakete für ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Scheitert ein System, braucht es die anderen nicht: Ein Release gibt es nur mit allen.
+      fail-fast: true
+      matrix:
+        include:
+          - system: Linux
+            runner: ubuntu-24.04
+            argumente: --bundles deb,rpm,appimage
+            pakete: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/rpm/*.rpm
+              src-tauri/target/release/bundle/appimage/*.AppImage
+          - system: Windows
+            runner: windows-latest
+            argumente: --bundles msi,nsis
+            pakete: |
+              src-tauri/target/release/bundle/msi/*.msi
+              src-tauri/target/release/bundle/nsis/*.exe
+          - system: macOS
+            runner: macos-latest
+            # Universal-Build: eine .dmg für Apple Silicon und Intel.
+            argumente: --target universal-apple-darwin --bundles dmg
+            rust_ziele: aarch64-apple-darwin,x86_64-apple-darwin
+            pakete: |
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          persist-credentials: false
+
+      - name: Zeitstempel und Rust-Version aus dem Commit bestimmen
+        id: werte
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          rust="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml)"
+          if [ -z "$rust" ]; then
+            echo "rust-version fehlt in src-tauri/Cargo.toml" >&2
+            exit 1
+          fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+
+      - name: Systembibliotheken für Tauri installieren
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libdbus-1-dev
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ steps.werte.outputs.rust }}
+          targets: ${{ matrix.rust_ziele }}
+
+      - name: Perl für die mitgelieferte OpenSSL wählen (Windows)
+        if: runner.os == 'Windows'
+        # Das Perl der Git-Bash kann OpenSSL nicht konfigurieren; Strawberry Perl liegt auf dem Runner bereit.
+        run: echo "OPENSSL_SRC_PERL=C:/Strawberry/perl/bin/perl.exe" >> "$GITHUB_ENV"
+
+      - name: npm ci
+        run: npm ci
+
+      - name: macOS-Signatur vorbereiten (nur mit Secrets)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Tauri signiert, sobald diese Variablen gesetzt sind; leere Werte werden gar nicht erst gesetzt.
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do
+              { echo "$name<<ENDE_WERT"; printenv "$name"; echo "ENDE_WERT"; } >> "$GITHUB_ENV"
+            done
+            echo "macOS-Paket wird signiert."
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              for name in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+                { echo "$name<<ENDE_WERT"; printenv "$name"; echo "ENDE_WERT"; } >> "$GITHUB_ENV"
+              done
+              echo "macOS-Paket wird notarisiert."
+            fi
+          else
+            echo "Keine Apple-Secrets gesetzt: macOS-Paket bleibt unsigniert."
+          fi
+
+      - name: Windows-Signatur vorbereiten (nur mit Secrets)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Output "Kein Windows-Zertifikat gesetzt: Windows-Pakete bleiben unsigniert."
+            exit 0
+          }
+          $pfad = Join-Path $env:RUNNER_TEMP "zertifikat.pfx"
+          [IO.File]::WriteAllBytes($pfad, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $passwort = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $zertifikat = Import-PfxCertificate -FilePath $pfad -CertStoreLocation Cert:\CurrentUser\My -Password $passwort
+          Remove-Item $pfad
+          $konfiguration = @{ bundle = @{ windows = @{ certificateThumbprint = $zertifikat.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" } } } | ConvertTo-Json -Compress -Depth 5
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNATUR_KONFIGURATION=$konfiguration"
+          Write-Output "Windows-Pakete werden signiert."
+
+      - name: Pakete bauen
+        env:
+          ARGUMENTE: ${{ matrix.argumente }}
+        run: |
+          zusatz=()
+          if [ -n "${TAURI_SIGNATUR_KONFIGURATION:-}" ]; then
+            zusatz=(--config "$TAURI_SIGNATUR_KONFIGURATION")
+          fi
+          # shellcheck disable=SC2086 # ARGUMENTE enthält bewusst mehrere Wörter
+          npm run tauri -- build $ARGUMENTE "${zusatz[@]}" -- --locked
+
+      - name: Gebaute Pakete auflisten
+        env:
+          PAKETE: ${{ matrix.pakete }}
+        run: |
+          # shellcheck disable=SC2086 # Muster sollen aufgelöst werden
+          ls -l $PAKETE
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pakete-${{ matrix.system }}
+          path: ${{ matrix.pakete }}
+          if-no-files-found: error
+          retention-days: 7
