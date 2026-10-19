@@ -10,6 +10,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 ### Behoben
 
 - Mehr Schutz: Nach einer Änderung von Server oder Benutzername muss das Passwort neu eingegeben werden, damit es nicht an einen falschen Server geht. Konto löschen entfernt das Passwort zuverlässig. Verdächtige Links werden auch mit verstecktem oder getarntem Text erkannt. Anhangnamen mit unsichtbaren oder Schreibrichtungs-Zeichen werden entschärft. `mailto:`-Links hängen keine Dateien mehr an. Externe Bilder aus dem eigenen Netz werden nie geladen (#16)
+- Neue Mails kommen auch nach einem stillen Verbindungsabbruch (Ruhezustand, WLAN-Wechsel) spätestens nach 2 Minuten an, und lehnt der Server IDLE ab, wird alle 2 Minuten abgefragt. Verschieben und die Ablage in „Gesendet“ erzeugen nach Verbindungsabbrüchen keine doppelten Mails mehr. Lokale Entwürfe gehen nicht mehr verloren, wenn die Datenbank kurz gesperrt ist. Bei dauerhaften Fehlern meldet sich SicherMail nicht mehr sekündlich neu an (#17)
 
 ## 0.1.0 – 2026-10-19
 

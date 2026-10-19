@@ -1,8 +1,10 @@
 //! Neue Mails ohne manuelles Aktualisieren.
 //!
 //! Pro Konto läuft eine eigene Verbindung, die den Posteingang beobachtet:
-//! - mit IMAP IDLE, wenn der Server es kann (spätestens alle 25 Minuten erneuert),
-//! - sonst durch Abfrage alle 2 Minuten.
+//! - mit IMAP IDLE, wenn der Server es kann. IDLE wird alle 2 Minuten erneuert; so fällt
+//!   auch eine still abgerissene Verbindung (NAT, Ruhezustand, WLAN-Wechsel) spätestens
+//!   dann auf, und der Posteingang wird abgeglichen.
+//! - sonst – oder wenn der Server IDLE wiederholt ablehnt – durch Abfrage alle 2 Minuten.
 //!
 //! Bricht die Verbindung ab, wird automatisch neu verbunden, mit wachsender Wartezeit
 //! (1 s, 2 s, 4 s … bis höchstens 5 Minuten). Nach jeder (Wieder-)Verbindung wird der
@@ -27,8 +29,12 @@ pub const POSTEINGANG: &str = "INBOX";
 /// Abfrageabstand, wenn der Server kein IDLE kann.
 pub const ABFRAGE_ABSTAND: Duration = Duration::from_secs(120);
 
-/// IDLE wird spätestens nach dieser Zeit erneuert (RFC 2177: unter 29 Minuten).
-const IDLE_DAUER: Duration = Duration::from_secs(25 * 60);
+/// IDLE wird spätestens nach dieser Zeit erneuert (RFC 2177 verlangt unter 29 Minuten;
+/// kürzer, damit eine still abgerissene Verbindung schnell auffällt).
+const IDLE_DAUER: Duration = ABFRAGE_ABSTAND;
+
+/// Nach so vielen gescheiterten IDLE-Starts in Folge wird nur noch abgefragt.
+const IDLE_MAX_FEHLSTARTS: u32 = 2;
 
 /// So viele der neuesten Mails im Posteingang werden für das Lesen ohne Internet vorgeladen.
 pub const VORLADEN_ANZAHL: usize = 50;
@@ -144,8 +150,17 @@ async fn beobachten(
     melden: Melder,
     mut wartezeit: Wartezeit,
 ) {
+    let mut idle_fehlstarts = 0;
     loop {
-        let fehler = match einmal_beobachten(&konto, &dienst, &melden, &mut wartezeit).await {
+        let fehler = match einmal_beobachten(
+            &konto,
+            &dienst,
+            &melden,
+            &mut wartezeit,
+            &mut idle_fehlstarts,
+        )
+        .await
+        {
             Ok(()) => continue,
             Err(fehler) => fehler,
         };
@@ -164,11 +179,15 @@ async fn beobachten(
 }
 
 /// Eine Verbindung aufbauen und beobachten, bis sie abbricht.
+///
+/// `idle_fehlstarts` zählt gescheiterte IDLE-Starts in Folge (über Verbindungen hinweg):
+/// Lehnt der Server IDLE wiederholt ab, wird stattdessen alle 2 Minuten abgefragt.
 async fn einmal_beobachten(
     konto_id: &str,
     dienst: &ImapDienst,
     melden: &Melder,
     wartezeit: &mut Wartezeit,
+    idle_fehlstarts: &mut u32,
 ) -> Result<(), Fehlermeldung> {
     let konto = dienst.konten().finden(konto_id).await?;
     let passwort = dienst.konten().passwort(konto_id)?;
@@ -176,23 +195,38 @@ async fn einmal_beobachten(
     drop(passwort);
 
     let faehigkeiten = sitzung.capabilities().await.map_err(fehler_einordnen)?;
-    let idle = faehigkeiten.has_str("IDLE");
+    let idle = faehigkeiten.has_str("IDLE") && *idle_fehlstarts < IDLE_MAX_FEHLSTARTS;
     // Nur lesend öffnen: Die Beobachtung ändert nichts am Postfach.
     sitzung
         .examine(POSTEINGANG)
         .await
         .map_err(fehler_einordnen)?;
 
-    wartezeit.zuruecksetzen();
     melden(Ereignis::Verbunden {
         konto: konto_id.to_string(),
         idle,
     });
     abgleichen_und_melden(konto_id, dienst, melden).await?;
+    // Erst nach einem erfolgreichen Abgleich: Scheitert er dauerhaft, wächst die Wartezeit
+    // weiter, statt sich jede Sekunde neu anzumelden.
+    wartezeit.zuruecksetzen();
 
     loop {
         if idle {
-            sitzung = idle_warten(sitzung).await?;
+            sitzung = match idle_warten(sitzung).await {
+                Ok(sitzung) => {
+                    *idle_fehlstarts = 0;
+                    sitzung
+                }
+                Err(IdleFehler::Start(fehler)) => {
+                    // Nur echte Ablehnungen zählen, keine Verbindungsabbrüche.
+                    if !fehler.neu_verbinden_sinnvoll() {
+                        *idle_fehlstarts += 1;
+                    }
+                    return Err(fehler.into());
+                }
+                Err(IdleFehler::Warten(fehler)) => return Err(fehler.into()),
+            };
         } else {
             sleep(ABFRAGE_ABSTAND).await;
             timeout(Duration::from_secs(60), sitzung.noop())
@@ -230,22 +264,33 @@ async fn abgleichen_und_melden(
     Ok(())
 }
 
+/// Wo IDLE gescheitert ist: beim Start (Server lehnt ab) oder danach (Verbindung).
+enum IdleFehler {
+    Start(VerbindungsFehler),
+    Warten(VerbindungsFehler),
+}
+
 /// Wartet per IDLE auf eine Änderung (oder bis zur Erneuerung) und gibt die Sitzung zurück.
-async fn idle_warten(sitzung: ImapSitzung) -> Result<ImapSitzung, VerbindungsFehler> {
+///
+/// Das abschliessende `DONE` muss innerhalb einer Minute bestätigt werden; so fällt eine
+/// tote Verbindung spätestens bei der Erneuerung auf.
+async fn idle_warten(sitzung: ImapSitzung) -> Result<ImapSitzung, IdleFehler> {
     let mut griff = sitzung.idle();
     timeout(Duration::from_secs(60), griff.init())
         .await
-        .map_err(|_| VerbindungsFehler::Zeitueberschreitung)?
-        .map_err(fehler_einordnen)?;
+        .map_err(|_| IdleFehler::Start(VerbindungsFehler::Zeitueberschreitung))?
+        .map_err(|f| IdleFehler::Start(fehler_einordnen(f)))?;
     let (warten, _stopp) = griff.wait_with_timeout(IDLE_DAUER);
-    let antwort = warten.await.map_err(fehler_einordnen)?;
+    let antwort = warten
+        .await
+        .map_err(|f| IdleFehler::Warten(fehler_einordnen(f)))?;
     let sitzung = timeout(Duration::from_secs(60), griff.done())
         .await
-        .map_err(|_| VerbindungsFehler::Zeitueberschreitung)?
-        .map_err(fehler_einordnen)?;
+        .map_err(|_| IdleFehler::Warten(VerbindungsFehler::Zeitueberschreitung))?
+        .map_err(|f| IdleFehler::Warten(fehler_einordnen(f)))?;
     match antwort {
         IdleResponse::NewData(_) | IdleResponse::Timeout => Ok(sitzung),
-        IdleResponse::ManualInterrupt => Err(VerbindungsFehler::Unterbrochen),
+        IdleResponse::ManualInterrupt => Err(IdleFehler::Warten(VerbindungsFehler::Unterbrochen)),
     }
 }
 

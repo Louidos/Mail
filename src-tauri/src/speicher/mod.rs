@@ -25,6 +25,12 @@ pub const DATEINAME: &str = "mails.db";
 
 const SCHEMA_VERSION: i32 = 1;
 
+/// Fehlerart: Die Datei passt nicht zum Schlüssel (oder ist keine Datenbank).
+const UNLESBAR: &str = "speicher_unlesbar";
+
+/// So lange wird gewartet, wenn die Datei gerade von einem anderen Zugriff gesperrt ist.
+const SPERRE_WARTEN: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn fehler(_: rusqlite::Error) -> Fehlermeldung {
     Fehlermeldung::neu(
         "speicher",
@@ -63,10 +69,12 @@ impl SqlCache {
     /// Öffnet (oder erstellt) die verschlüsselte Datenbank.
     ///
     /// Passt der Schlüssel nicht zur vorhandenen Datei, wird die Datei verworfen und neu angelegt.
+    /// Bei anderen Fehlern (z. B. Datei gerade gesperrt) bleibt sie erhalten – sie enthält auch
+    /// Entwürfe, die es nur lokal gibt.
     pub fn oeffnen(pfad: &Path, schluessel: &[u8; 32]) -> Result<Self, Fehlermeldung> {
         match Self::oeffnen_versuch(pfad, schluessel) {
             Ok(cache) => Ok(cache),
-            Err(_) if pfad.exists() => {
+            Err(fehler) if fehler.art == UNLESBAR && pfad.exists() => {
                 Self::dateien_entfernen(pfad);
                 Self::oeffnen_versuch(pfad, schluessel)
             }
@@ -95,6 +103,7 @@ impl SqlCache {
             })?;
         }
         let verbindung = Connection::open(pfad).map_err(fehler)?;
+        verbindung.busy_timeout(SPERRE_WARTEN).map_err(fehler)?;
         // Keine SQLCipher-Meldungen auf der Konsole.
         let _ = verbindung.execute_batch("PRAGMA cipher_log_level = NONE;");
         // Rohschlüssel (kein Passwort): x'<64 Hex-Zeichen>'
@@ -105,7 +114,12 @@ impl SqlCache {
             .query_row("SELECT count(*) FROM sqlite_master", [], |z| {
                 z.get::<_, i64>(0)
             })
-            .map_err(fehler)?;
+            .map_err(|e| match e.sqlite_error_code() {
+                Some(rusqlite::ErrorCode::NotADatabase) => {
+                    Fehlermeldung::neu(UNLESBAR, "Der lokale Speicher passt nicht zum Schlüssel.")
+                }
+                _ => fehler(e),
+            })?;
         verbindung
             .execute_batch(
                 "PRAGMA secure_delete = ON;
@@ -542,6 +556,33 @@ mod tests {
         }
         let cache = SqlCache::oeffnen(&pfad, &schluessel(9)).unwrap();
         assert!(cache.uids("k", "INBOX").unwrap().is_empty());
+    }
+
+    #[test]
+    fn gesperrte_datei_wird_nicht_verworfen() {
+        let ordner = tempfile::tempdir().unwrap();
+        let pfad = ordner.path().join(DATEINAME);
+        let erste = SqlCache::oeffnen(&pfad, &schluessel(4)).unwrap();
+        erste.koepfe_speichern("k", "INBOX", &[kopf(1)]).unwrap();
+        // Eine andere Instanz hält die Datei gesperrt.
+        erste
+            .verbindung
+            .lock()
+            .unwrap()
+            .execute_batch("BEGIN EXCLUSIVE;")
+            .unwrap();
+        let fehler = SqlCache::oeffnen(&pfad, &schluessel(4)).err().unwrap();
+        assert_ne!(fehler.art, UNLESBAR);
+        erste
+            .verbindung
+            .lock()
+            .unwrap()
+            .execute_batch("COMMIT;")
+            .unwrap();
+        drop(erste);
+        // Die Daten (z. B. Entwürfe) sind noch da.
+        let wieder = SqlCache::oeffnen(&pfad, &schluessel(4)).unwrap();
+        assert_eq!(wieder.uids("k", "INBOX").unwrap(), vec![1]);
     }
 
     #[test]
