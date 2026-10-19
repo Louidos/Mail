@@ -187,4 +187,27 @@ Alle Farben, Abstände, Radien, Schatten und Schriftgrössen stehen zentral als 
 am Anfang von `src/styles.css` (Hauptfarbe `#2563EB` auf Weiss, Ecken 8px für Knöpfe und
 Felder, 12px für Karten und Dialoge, Abstände im 4er/8er-Raster). Im übrigen Code werden
 keine festen Farbwerte verwendet; `tests/design.test.ts` prüft das. Die Mailanzeige im
-iframe übernimmt ihre Grundfarben beim Aufbau aus diesen Variablen.
+iframe übernimmt ihre Grundfarben beim Aufbau aus den Variablen `--mail-*`.
+
+### Hell und dunkel (#47)
+
+- Jede Farbvariable hat einen hellen Wert (`:root, ::backdrop`) und einen dunklen. Die dunklen Werte stehen
+  zweimal gleich im zentralen Bereich: in `@media (prefers-color-scheme: dark)` für „Automatisch“ und unter
+  `:root[data-darstellung="dunkel"]` zum Erzwingen; `data-darstellung="hell"` schaltet die Media-Query ab.
+  `color-scheme` wird passend gesetzt, damit auch Bildlaufleisten und Formularelemente mitziehen. Statt
+  `--weiss` gibt es dafür Rollen: `--grund` (Fenster), `--flaeche` (Karten, Dialoge, Felder), `--auf-farbe`
+  (Text auf blauen und roten Flächen).
+- Der Mailinhalt im iframe bleibt immer hell (`--mail-grund`, `--mail-text`, `--mail-link` sind in beiden
+  Darstellungen gleich), weil viele HTML-Mails nur für Weiss gestaltet sind; nur der Rahmen ist dunkel.
+- `tests/design.test.ts` prüft, dass es zu jeder hellen Farbe eine dunkle gibt, dass beide dunklen Blöcke
+  gleich sind und dass die wichtigen Paare (Text, leiser Text, Warnung, Fehler, Erfolg, Knöpfe, Fokus) in beiden
+  Darstellungen mindestens 4,5:1 Kontrast nach WCAG erreichen.
+- Gespeichert wird die Wahl als `darstellung` (`automatisch` | `hell` | `dunkel`) in `einstellungen.json`;
+  fehlt das Feld (ältere Dateien) oder ist es unbekannt, gilt `automatisch`.
+- Kein helles Aufblitzen: Das Hauptfenster steht in `tauri.conf.json` mit `create: false` und wird in
+  `lib.rs` aus dieser Konfiguration erzeugt – mit passendem Fenster-Thema (Titelleiste), dunklem
+  Fenstergrund und einem Startskript, das `data-darstellung` setzt, bevor die Seite gezeichnet wird. Bei
+  „Automatisch“ genügt die Media-Query; `src/einstellungen/darstellung.ts` reagiert zusätzlich mit
+  `matchMedia(...).addEventListener("change", …)` auf Wechsel im Betrieb.
+- Die Titelleiste stellt der Befehl `darstellung_setzen` im Backend um (`set_theme`); das Frontend braucht
+  dafür keine zusätzliche Berechtigung, die Capabilities bleiben unverändert.

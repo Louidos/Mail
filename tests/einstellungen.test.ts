@@ -13,12 +13,16 @@ interface TestEinstellungen {
   speicher_hinweis: string | null;
   proxy_externe_bilder?: boolean;
   proxy_adresse?: string;
+  darstellung?: "automatisch" | "hell" | "dunkel";
 }
 
-function backend(einstellungen: TestEinstellungen, proxyFehler: string | null = null) {
+function backend(einstellungen: TestEinstellungen, proxyFehler: string | null = null, darstellungFehler = false) {
   invoke.mockImplementation((befehl: string, argumente?: { an?: boolean }) => {
     if (befehl === "einstellungen_laden") {
-      return Promise.resolve({ proxy_externe_bilder: false, proxy_adresse: "", ...einstellungen });
+      return Promise.resolve({ proxy_externe_bilder: false, proxy_adresse: "", darstellung: "automatisch", ...einstellungen });
+    }
+    if (befehl === "darstellung_setzen" && darstellungFehler) {
+      return Promise.reject({ art: "datei", meldung: "Die Einstellungen konnten nicht gespeichert werden." });
     }
     if (befehl === "proxy_setzen" && argumente?.an && proxyFehler) {
       return Promise.reject({ art: "eingabe", meldung: proxyFehler });
@@ -35,6 +39,49 @@ describe("Einstellungen", () => {
   beforeEach(() => {
     invoke.mockReset();
     document.body.replaceChildren();
+    delete document.documentElement.dataset.darstellung;
+  });
+
+  it("bietet die Darstellung an, standardmässig „Automatisch“", async () => {
+    backend({ lokal_speichern: true, externe_inhalte_erlaubt: [], speicher_hinweis: null });
+    const dialog = await einstellungenOeffnen(() => {});
+    const auswahl = dialog.querySelector("[name=darstellung]") as HTMLSelectElement;
+    expect(auswahl.value).toBe("automatisch");
+    expect([...auswahl.options].map((o) => o.value)).toEqual(["automatisch", "hell", "dunkel"]);
+    expect(dialog.querySelector("label[for=einstellung-darstellung]")?.textContent).toBe("Hell oder dunkel");
+  });
+
+  it("zeigt die gespeicherte Darstellung und wendet eine neue Wahl sofort an", async () => {
+    backend({ lokal_speichern: true, externe_inhalte_erlaubt: [], speicher_hinweis: null, darstellung: "hell" });
+    const dialog = await einstellungenOeffnen(() => {});
+    const auswahl = dialog.querySelector("[name=darstellung]") as HTMLSelectElement;
+    expect(auswahl.value).toBe("hell");
+    auswahl.value = "dunkel";
+    auswahl.dispatchEvent(new Event("change"));
+    // Sofort sichtbar, noch bevor das Backend geantwortet hat.
+    expect(document.documentElement.dataset.darstellung).toBe("dunkel");
+    expect(document.documentElement.dataset.aktiv).toBe("dunkel");
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("darstellung_setzen", { darstellung: "dunkel" });
+    expect(dialog.querySelector(".status")?.getAttribute("data-art")).toBe("erfolg");
+
+    auswahl.value = "automatisch";
+    auswahl.dispatchEvent(new Event("change"));
+    await warten();
+    expect(document.documentElement.dataset.darstellung).toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith("darstellung_setzen", { darstellung: "automatisch" });
+  });
+
+  it("stellt die Darstellung zurück, wenn das Speichern scheitert", async () => {
+    backend({ lokal_speichern: true, externe_inhalte_erlaubt: [], speicher_hinweis: null, darstellung: "hell" }, null, true);
+    const dialog = await einstellungenOeffnen(() => {});
+    const auswahl = dialog.querySelector("[name=darstellung]") as HTMLSelectElement;
+    auswahl.value = "dunkel";
+    auswahl.dispatchEvent(new Event("change"));
+    await warten();
+    expect(auswahl.value).toBe("hell");
+    expect(document.documentElement.dataset.darstellung).toBe("hell");
+    expect(dialog.querySelector(".status")?.getAttribute("data-art")).toBe("fehler");
   });
 
   it("zeigt „Mails lokal speichern“ standardmässig eingeschaltet", async () => {

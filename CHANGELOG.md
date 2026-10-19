@@ -7,6 +7,10 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+### Hinzugefügt
+
+- Dunkle Darstellung im blau-weissen Design: folgt automatisch der Systemeinstellung oder lässt sich in den Einstellungen auf „Hell“ oder „Dunkel“ festlegen (#47)
+
 ## 0.3.0 – 2026-10-19
 
 ### Hinzugefügt

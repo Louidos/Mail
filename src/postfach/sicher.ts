@@ -32,7 +32,9 @@ const SYSTEMFARBEN: MailFarben = { hintergrund: "Canvas", text: "CanvasText", li
 /**
  * Liest die Farben aus den zentralen CSS-Variablen (`src/styles.css`). Das iframe ist ein
  * eigenes Dokument und sieht die Variablen des Hauptfensters nicht; deshalb werden die
- * Werte hier übernommen. Nur einfache Farbwerte werden akzeptiert.
+ * Werte hier übernommen. Nur einfache Farbwerte werden akzeptiert. Die `--mail-*`-Farben
+ * bleiben auch in der dunklen Darstellung hell (#47), weil viele HTML-Mails nur für
+ * weissen Grund gestaltet sind.
  */
 export function mailFarben(dokument: Document = document): MailFarben {
   const stil = dokument.defaultView?.getComputedStyle(dokument.documentElement);
@@ -41,9 +43,9 @@ export function mailFarben(dokument: Document = document): MailFarben {
     return /^#[0-9a-f]{3,8}$/i.test(wert) ? wert : ersatz;
   };
   return {
-    hintergrund: lesen("--weiss", SYSTEMFARBEN.hintergrund),
-    text: lesen("--text", SYSTEMFARBEN.text),
-    link: lesen("--blau", SYSTEMFARBEN.link),
+    hintergrund: lesen("--mail-grund", SYSTEMFARBEN.hintergrund),
+    text: lesen("--mail-text", SYSTEMFARBEN.text),
+    link: lesen("--mail-link", SYSTEMFARBEN.link),
   };
 }
 

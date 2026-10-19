@@ -1,7 +1,8 @@
-/** Dialog „Einstellungen“: lokaler Speicher, Proxy für externe Bilder und freigegebene Absender. */
+/** Dialog „Einstellungen“: Darstellung, lokaler Speicher, Proxy für externe Bilder und freigegebene Absender. */
 import { api, fehlertext, type Einstellungen } from "../api";
 import { bestaetigen, modalSchliessen, modalZeigen } from "../dialoge";
 import { el } from "../dom";
+import { DARSTELLUNGEN, darstellungAnwenden, type Darstellung } from "./darstellung";
 
 /** Warnhinweis zum Proxy für externe Bilder (#46). */
 export const PROXY_HINWEIS =
@@ -35,6 +36,27 @@ export async function einstellungenOeffnen(geaendert: () => void): Promise<HTMLD
   };
 
   const zeichnen = (e: Einstellungen) => {
+    const darstellung = el(
+      "select",
+      { name: "darstellung", id: "einstellung-darstellung" },
+      ...DARSTELLUNGEN.map(({ wert, text }) => el("option", { value: wert, selected: wert === e.darstellung }, text)),
+    );
+    let bisher: Darstellung = e.darstellung;
+    darstellung.addEventListener("change", async () => {
+      const neu = darstellung.value as Darstellung;
+      // Sofort sichtbar; scheitert das Speichern, wird zurückgestellt.
+      darstellungAnwenden(neu);
+      try {
+        await api.darstellungSetzen(neu);
+        bisher = neu;
+        statusSetzen("Die Darstellung wurde gespeichert.", "erfolg");
+      } catch (fehler) {
+        darstellungAnwenden(bisher);
+        darstellung.value = bisher;
+        statusSetzen(fehlertext(fehler), "fehler");
+      }
+    });
+
     const lokal = el("input", { type: "checkbox", name: "lokal_speichern", checked: e.lokal_speichern });
     lokal.addEventListener("change", async () => {
       const an = lokal.checked;
@@ -140,6 +162,22 @@ export async function einstellungenOeffnen(geaendert: () => void): Promise<HTMLD
     }
 
     inhalt.replaceChildren(
+      el(
+        "section",
+        { class: "einstellung" },
+        el("h3", {}, "Darstellung"),
+        el(
+          "div",
+          { class: "feld" },
+          el("label", { class: "beschriftung", for: "einstellung-darstellung" }, "Hell oder dunkel"),
+          darstellung,
+        ),
+        el(
+          "p",
+          { class: "leise" },
+          "„Automatisch“ folgt der Einstellung deines Systems. Der Inhalt von Mails bleibt immer auf hellem Grund, weil viele Mails nur dafür gestaltet sind.",
+        ),
+      ),
       el(
         "section",
         { class: "einstellung" },

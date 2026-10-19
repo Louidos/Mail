@@ -1,20 +1,30 @@
 /*
- * Design von SicherMail: Blau (#2563EB) auf Weiss, abgerundet, ruhig.
+ * Design von SicherMail: Blau (#2563EB) auf Weiss, abgerundet, ruhig – hell und dunkel.
  *
  * Alle Farben, Abstände, Radien, Schatten und Schriftgrössen stehen nur hier als
  * Variablen. Im übrigen Code keine festen Farbwerte verwenden, sondern diese Variablen.
  * `::backdrop` steht mit dabei, weil es die Variablen von `:root` nicht überall erbt.
+ *
+ * Darstellung (#47): Ohne Angabe folgt SicherMail dem System (`prefers-color-scheme`).
+ * `data-darstellung="hell"` bzw. `"dunkel"` am `<html>`-Element legt sie von Hand fest.
+ * Jede Farbvariable braucht deshalb einen hellen und einen dunklen Wert; die beiden
+ * dunklen Blöcke unten sind gleich. Der Mailinhalt (`--mail-*`) bleibt immer hell,
+ * weil viele HTML-Mails nur für weissen Grund gestaltet sind.
  */
 :root,
 ::backdrop {
+  color-scheme: light;
+
   /* Hauptfarbe und Abstufungen */
   --blau: #2563eb;
   --blau-dunkel: #1d4ed8;
   --blau-hell: #eff6ff;
   --blau-rand: #dbeafe;
 
-  /* Grundfarben */
-  --weiss: #ffffff;
+  /* Grundfarben: Fenster, Flächen (Karten, Dialoge, Eingabefelder), Text auf Blau oder Rot */
+  --grund: #ffffff;
+  --flaeche: #ffffff;
+  --auf-farbe: #ffffff;
   --text: #1f2937;
   --text-leise: #6b7280;
   --linie: #e5e7eb;
@@ -26,6 +36,11 @@
   --warnung: #92400e;
   --warnung-flaeche: #fffbeb;
   --erfolg: #15803d;
+
+  /* Mailinhalt im abgeschotteten iframe */
+  --mail-grund: #ffffff;
+  --mail-text: #1f2937;
+  --mail-link: #2563eb;
 
   /* Schatten und Abdunkelung hinter Dialogen */
   --schatten: 0 1px 3px rgb(0 0 0 / 8%);
@@ -56,8 +71,81 @@
   --uebergang: 150ms ease;
 }
 
+/* Dunkel nach Systemeinstellung („Automatisch“), ausser von Hand „Hell“ gewählt */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-darstellung="hell"]),
+  :root:not([data-darstellung="hell"]) ::backdrop {
+    color-scheme: dark;
+
+    /* Hauptfarbe: heller, damit sie auf dunklem Grund lesbar bleibt; „-dunkel“ ist die kräftigere Abstufung */
+    --blau: #60a5fa;
+    --blau-dunkel: #93c5fd;
+    --blau-hell: #172554;
+    --blau-rand: #1e3a8a;
+
+    --grund: #0f172a;
+    --flaeche: #1e293b;
+    --auf-farbe: #0f172a;
+    --text: #f1f5f9;
+    --text-leise: #a3b1c6;
+    --linie: #334155;
+
+    --fehler: #f87171;
+    --fehler-dunkel: #fca5a5;
+    --fehler-flaeche: #450a0a;
+    --warnung: #fcd34d;
+    --warnung-flaeche: #451a03;
+    --erfolg: #4ade80;
+
+    /* Mailinhalt bleibt hell, nur der Rahmen drumherum ist dunkel */
+    --mail-grund: #ffffff;
+    --mail-text: #1f2937;
+    --mail-link: #2563eb;
+
+    --schatten: 0 1px 3px rgb(0 0 0 / 40%);
+    --schatten-gross: 0 8px 24px rgb(0 0 0 / 55%);
+    --abdunkeln: rgb(2 6 23 / 70%);
+  }
+}
+
+/* Dunkel von Hand gewählt */
+:root[data-darstellung="dunkel"],
+:root[data-darstellung="dunkel"] ::backdrop {
+  color-scheme: dark;
+
+  /* Hauptfarbe: heller, damit sie auf dunklem Grund lesbar bleibt; „-dunkel“ ist die kräftigere Abstufung */
+  --blau: #60a5fa;
+  --blau-dunkel: #93c5fd;
+  --blau-hell: #172554;
+  --blau-rand: #1e3a8a;
+
+  --grund: #0f172a;
+  --flaeche: #1e293b;
+  --auf-farbe: #0f172a;
+  --text: #f1f5f9;
+  --text-leise: #a3b1c6;
+  --linie: #334155;
+
+  --fehler: #f87171;
+  --fehler-dunkel: #fca5a5;
+  --fehler-flaeche: #450a0a;
+  --warnung: #fcd34d;
+  --warnung-flaeche: #451a03;
+  --erfolg: #4ade80;
+
+  /* Mailinhalt bleibt hell, nur der Rahmen drumherum ist dunkel */
+  --mail-grund: #ffffff;
+  --mail-text: #1f2937;
+  --mail-link: #2563eb;
+
+  --schatten: 0 1px 3px rgb(0 0 0 / 40%);
+  --schatten-gross: 0 8px 24px rgb(0 0 0 / 55%);
+  --abdunkeln: rgb(2 6 23 / 70%);
+}
+
+/* Ende der zentralen Designvariablen */
+
 :root {
-  color-scheme: light;
   font-family: var(--schrift);
   font-size: var(--groesse-normal);
   line-height: 1.5;
@@ -74,7 +162,7 @@ body {
 
 body {
   margin: 0;
-  background: var(--weiss);
+  background: var(--grund);
   color: var(--text);
 }
 
@@ -110,7 +198,7 @@ button {
   padding: var(--abstand-2) var(--abstand-4);
   border: 1px solid var(--blau);
   border-radius: var(--radius-klein);
-  background: var(--weiss);
+  background: var(--flaeche);
   color: var(--blau);
   cursor: pointer;
   transition:
@@ -134,13 +222,13 @@ button:disabled {
 button.haupt {
   background: var(--blau);
   border-color: var(--blau);
-  color: var(--weiss);
+  color: var(--auf-farbe);
 }
 
 button.haupt:hover:not(:disabled) {
   background: var(--blau-dunkel);
   border-color: var(--blau-dunkel);
-  color: var(--weiss);
+  color: var(--auf-farbe);
 }
 
 button.gefahr {
@@ -158,14 +246,14 @@ button.haupt.gefahr,
 .warnung button.gefahr {
   background: var(--fehler);
   border-color: var(--fehler);
-  color: var(--weiss);
+  color: var(--auf-farbe);
 }
 
 button.haupt.gefahr:hover:not(:disabled),
 .warnung button.gefahr:hover:not(:disabled) {
   background: var(--fehler-dunkel);
   border-color: var(--fehler-dunkel);
-  color: var(--weiss);
+  color: var(--auf-farbe);
 }
 
 button.klein {
@@ -186,7 +274,7 @@ textarea {
   padding: var(--abstand-2) var(--abstand-3);
   border: 1px solid var(--linie);
   border-radius: var(--radius-klein);
-  background: var(--weiss);
+  background: var(--flaeche);
   color: var(--text);
   width: 100%;
   transition:
@@ -293,7 +381,7 @@ nav.konten {
 .konto {
   padding: var(--abstand-3);
   border-radius: var(--radius-gross);
-  background: var(--weiss);
+  background: var(--flaeche);
   box-shadow: var(--schatten);
   border: 1px solid var(--linie);
 }
@@ -487,7 +575,7 @@ details.absender-pruefung summary {
   border: 1px solid var(--blau-rand);
   border-radius: var(--radius-klein);
   padding: 0 var(--abstand-2);
-  background: var(--weiss);
+  background: var(--flaeche);
   color: var(--text-leise);
 }
 
@@ -513,7 +601,7 @@ details.absender-pruefung ul {
   list-style: none;
   border: 1px solid var(--linie);
   border-radius: var(--radius-klein);
-  background: var(--weiss);
+  background: var(--flaeche);
 }
 
 .absender-warnung {
@@ -573,7 +661,7 @@ iframe.mail-rahmen {
   min-height: 120px;
   border: 1px solid var(--linie);
   border-radius: var(--radius-gross);
-  background: var(--weiss);
+  background: var(--mail-grund);
 }
 
 .mailtext {
@@ -621,7 +709,7 @@ ul.anhaenge li {
 dialog {
   border: none;
   border-radius: var(--radius-gross);
-  background: var(--weiss);
+  background: var(--flaeche);
   color: var(--text);
   box-shadow: var(--schatten-gross);
   padding: var(--abstand-5);
@@ -851,7 +939,7 @@ ul.entwurf-liste li {
   padding: var(--abstand-2) var(--abstand-3);
   border: 1px solid var(--blau-rand);
   border-radius: var(--radius-gross);
-  background: var(--weiss);
+  background: var(--flaeche);
   font-size: var(--groesse-klein);
 }
 
