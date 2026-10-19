@@ -37,6 +37,24 @@ const ANTWORT_ZEITLIMIT: Duration = Duration::from_secs(20);
 /// Maximale Länge einer Zeile im unverschlüsselten Teil von STARTTLS.
 const MAX_ZEILENLAENGE: usize = 4096;
 
+/// Maximale Anzahl Zeilen im unverschlüsselten Teil von STARTTLS (Begrüssung,
+/// Fähigkeiten, Antwort auf STARTTLS). Übliche Server brauchen weniger als 30.
+const MAX_KLARTEXT_ZEILEN: usize = 200;
+
+/// Zeitlimit für den ganzen unverschlüsselten Teil von STARTTLS. Ohne dieses Limit
+/// könnte eine Gegenstelle die Verbindung mit einer Zeile alle paar Sekunden
+/// beliebig lange offen halten.
+const AUSHANDLUNGS_ZEITLIMIT: Duration = Duration::from_secs(60);
+
+/// Führt den unverschlüsselten Teil von STARTTLS mit Gesamtzeitlimit aus.
+pub async fn aushandeln_mit_zeitlimit<T>(
+    aushandlung: impl std::future::Future<Output = Result<T, VerbindungsFehler>>,
+) -> Result<T, VerbindungsFehler> {
+    tokio::time::timeout(AUSHANDLUNGS_ZEITLIMIT, aushandlung)
+        .await
+        .map_err(|_| VerbindungsFehler::Zeitueberschreitung)?
+}
+
 fn krypto() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
@@ -306,15 +324,26 @@ impl AsyncWrite for TlsStrom {
 /// TLS-Handshake scheitern lassen.
 pub struct KlartextVorTls {
     strom: TcpStream,
+    gelesene_zeilen: usize,
 }
 
 impl KlartextVorTls {
     pub fn neu(strom: TcpStream) -> Self {
-        Self { strom }
+        Self {
+            strom,
+            gelesene_zeilen: 0,
+        }
     }
 
     /// Liest eine Zeile (ohne CRLF).
     pub async fn zeile_lesen(&mut self) -> Result<String, VerbindungsFehler> {
+        self.gelesene_zeilen += 1;
+        if self.gelesene_zeilen > MAX_KLARTEXT_ZEILEN {
+            return Err(VerbindungsFehler::Protokoll(
+                "Der Server sendet vor der Verschlüsselung zu viele Zeilen. Verbindung abgebrochen."
+                    .into(),
+            ));
+        }
         let mut zeile = Vec::new();
         let lesen = async {
             loop {
@@ -401,6 +430,49 @@ mod tests {
         );
         let fehler = zertifikat_lesen("kein Zertifikat").unwrap_err();
         assert!(matches!(fehler, VerbindungsFehler::Eingabe(_)));
+    }
+
+    #[tokio::test]
+    async fn klartext_vor_tls_liest_nicht_endlos_viele_zeilen() {
+        let lauscher = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let adresse = lauscher.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut strom, _) = lauscher.accept().await.unwrap();
+            for _ in 0..10_000 {
+                if strom.write_all(b"* CAPABILITY A A A\r\n").await.is_err() {
+                    break;
+                }
+            }
+        });
+        let mut klartext = KlartextVorTls::neu(TcpStream::connect(adresse).await.unwrap());
+        let fehler = loop {
+            if let Err(fehler) = klartext.zeile_lesen().await {
+                break fehler;
+            }
+        };
+        assert!(
+            matches!(&fehler, VerbindungsFehler::Protokoll(m) if m.contains("zu viele Zeilen")),
+            "{fehler:?}"
+        );
+        assert_eq!(klartext.gelesene_zeilen, MAX_KLARTEXT_ZEILEN + 1);
+        server.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn aushandlung_hat_ein_gesamtzeitlimit() {
+        let start = tokio::time::Instant::now();
+        // Eine Aushandlung, die nie fertig wird, endet nach dem Gesamtzeitlimit.
+        let ergebnis = tokio::time::timeout(
+            Duration::from_secs(600),
+            aushandeln_mit_zeitlimit(std::future::pending::<Result<(), VerbindungsFehler>>()),
+        )
+        .await
+        .expect("Gesamtzeitlimit greift nicht");
+        assert!(matches!(
+            ergebnis,
+            Err(VerbindungsFehler::Zeitueberschreitung)
+        ));
+        assert_eq!(start.elapsed(), AUSHANDLUNGS_ZEITLIMIT);
     }
 
     #[test]
