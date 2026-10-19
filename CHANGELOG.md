@@ -7,6 +7,8 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+## 0.3.0 – 2026-10-19
+
 ### Hinzugefügt
 
 - Neue Einstellung „Proxy für externe Bilder verwenden“ (standardmässig aus): Wer nur über einen Proxy ins Internet kommt, kann externe Bilder wieder laden; der Dialog erklärt, welcher Schutz dabei wegfällt (#46)
