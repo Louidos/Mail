@@ -1,10 +1,20 @@
 name: Release
 
-# Erstellt beim Push eines Versions-Tags (vX.Y.Z) ein GitHub-Release
-# mit dem passenden Abschnitt aus CHANGELOG.md.
+# Erstellt ein GitHub-Release mit dem passenden Abschnitt aus CHANGELOG.md:
+# - automatisch beim Push eines Versions-Tags (vX.Y.Z),
+# - oder von Hand („Run workflow“) mit Version und Commit; dann legt der Workflow
+#   den Tag selbst an (für Umgebungen, in denen Tags nicht gepusht werden können).
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version ohne v, z. B. 0.1.0"
+        required: true
+      commit:
+        description: "Commit auf main, auf den der Tag zeigen soll (Standard: aktueller Stand von main)"
+        required: false
 
 permissions:
   contents: write
@@ -13,22 +23,78 @@ jobs:
   release:
     runs-on: ubuntu-24.04
     steps:
+      - name: Version und Commit bestimmen
+        id: ziel
+        env:
+          EINGABE_VERSION: ${{ inputs.version }}
+          EINGABE_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            version="$EINGABE_VERSION"
+            commit="${EINGABE_COMMIT:-$GITHUB_SHA}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            commit="$GITHUB_SHA"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Ungültige Version: $version" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$commit" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            echo "Ungültiger Commit: $commit" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.ziel.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Prüfen, dass der Commit auf main liegt und die Version stimmt
+        env:
+          VERSION: ${{ steps.ziel.outputs.version }}
+        run: |
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD origin/main || { echo "Commit liegt nicht auf main" >&2; exit 1; }
+          paket="$(node -p "require('./package.json').version")"
+          if [ "$paket" != "$VERSION" ]; then
+            echo "package.json hat Version $paket, nicht $VERSION" >&2
+            exit 1
+          fi
+          grep -q "^version = \"$VERSION\"$" src-tauri/Cargo.toml || { echo "Cargo.toml passt nicht" >&2; exit 1; }
+          grep -q "\"version\": \"$VERSION\"" src-tauri/tauri.conf.json || { echo "tauri.conf.json passt nicht" >&2; exit 1; }
 
       - name: CHANGELOG-Abschnitt auslesen
+        env:
+          VERSION: ${{ steps.ziel.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '
+          awk -v v="$VERSION" '
             $0 ~ "^## " v "( |$)" { drin = 1; next }
             drin && /^## / { exit }
             drin { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
-            echo "Kein CHANGELOG-Abschnitt für $version gefunden" >&2
+            echo "Kein CHANGELOG-Abschnitt für $VERSION gefunden" >&2
             exit 1
           fi
 
       - name: Release erstellen
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag
+          VERSION: ${{ steps.ziel.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Bestehende Tags werden nie verschoben.
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "Tag $tag gibt es schon" >&2
+              exit 1
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "$VERSION"
+            git push origin "$tag"
+          fi
+          gh release create "$tag" --title "$tag" --notes-file release-notes.md --verify-tag
