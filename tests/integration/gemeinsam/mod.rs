@@ -60,6 +60,7 @@ pub fn eingabe(benutzer: &str, passwort: &str) -> KontoEingabe {
         imap: server(IMAP_TLS, Verschluesselung::Tls, true),
         smtp: server(SMTP_TLS, Verschluesselung::Tls, true),
         gesendet_ablegen: true,
+        absender_kennung: String::new(),
     }
 }
 

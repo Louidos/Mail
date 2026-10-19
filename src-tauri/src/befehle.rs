@@ -203,7 +203,8 @@ pub async fn mail_verschieben(
 /// Bereitet eine Mail sicher zur Anzeige auf.
 ///
 /// Externe Inhalte werden nur geladen, wenn der Nutzer es für diese Mail verlangt
-/// (`extern_laden`) oder für den Absender dauerhaft erlaubt hat.
+/// (`extern_laden`) oder für den Absender dauerhaft erlaubt hat. Die dauerhafte Freigabe gilt
+/// nicht, wenn der eigene Server den Absender als wahrscheinlich gefälscht erkannt hat (#45).
 #[tauri::command]
 pub async fn mail_anzeigen(
     zustand: State<'_, AppZustand>,
@@ -212,17 +213,20 @@ pub async fn mail_anzeigen(
     uid: u32,
     extern_laden: bool,
 ) -> Result<AufbereiteteMail, Fehlermeldung> {
+    let kennung = zustand
+        .konten
+        .finden(&konto)
+        .await?
+        .absender_kennung()
+        .to_string();
     let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
-    let mail = anzeige::aufbereiten(&roh, None)?;
+    let pruefung = anzeige::absender_pruefen(&roh, &kennung)?;
+    let mut mail = anzeige::aufbereiten(&roh, None)?;
+    mail.absender_pruefung = pruefung.clone();
     if mail.extern_blockiert == 0 {
         return Ok(mail);
     }
-    let absender = mail
-        .von
-        .first()
-        .map(|a| a.adresse.clone())
-        .unwrap_or_default();
-    if !extern_laden && !zustand.einstellungen.extern_erlaubt(&absender).await {
+    if !extern_laden && !zustand.einstellungen.extern_erlaubt_fuer(&mail).await {
         return Ok(mail);
     }
     // Ein eingeschalteter, aber ungültiger Proxy lädt nichts: Bilder bleiben blockiert.
@@ -231,7 +235,9 @@ pub async fn mail_anzeigen(
     };
     let adressen = anzeige::externe_adressen(&roh)?;
     let geladen = extern_inhalte::bilder_laden(&adressen, proxy.as_ref()).await;
-    anzeige::aufbereiten(&roh, Some(&geladen))
+    let mut mail = anzeige::aufbereiten(&roh, Some(&geladen))?;
+    mail.absender_pruefung = pruefung;
+    Ok(mail)
 }
 
 /// Erlaubt externe Inhalte für einen Absender dauerhaft.

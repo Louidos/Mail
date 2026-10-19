@@ -18,6 +18,7 @@ const konto: Konto = {
   imap: { host: "imap.example.org", port: 993, verschluesselung: "tls" },
   smtp: { host: "smtp.example.org", port: 465, verschluesselung: "tls" },
   gesendet_ablegen: true,
+  absender_kennung: "",
 };
 
 const mail: AufbereiteteMail = {
@@ -37,6 +38,15 @@ const mail: AufbereiteteMail = {
   extern_blockiert: 0,
   extern_geladen: false,
   anhaenge: [],
+  absender_pruefung: {
+    stufe: "nicht_geprueft",
+    kennung: "imap.example.org",
+    gefunden: false,
+    absender_domain: "example.org",
+    dkim: [],
+    spf: null,
+    dmarc: null,
+  },
 };
 
 describe("Antworten und Weiterleiten", () => {

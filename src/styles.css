@@ -470,6 +470,79 @@ dl.kopfdaten dd {
   overflow-wrap: anywhere;
 }
 
+/* Absenderprüfung (#45): Symbol und Text, nie nur Farbe */
+dl.kopfdaten dd.von {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--abstand-2);
+}
+
+details.absender-pruefung summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--abstand-1);
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--blau-rand);
+  border-radius: var(--radius-klein);
+  padding: 0 var(--abstand-2);
+  background: var(--weiss);
+  color: var(--text-leise);
+}
+
+details.absender-pruefung summary::-webkit-details-marker {
+  display: none;
+}
+
+details.absender-pruefung[data-stufe="bestaetigt"] summary {
+  background: var(--blau-hell);
+  color: var(--blau-dunkel);
+}
+
+details.absender-pruefung[data-stufe="warnung"] summary {
+  background: var(--fehler-flaeche);
+  border-color: var(--fehler);
+  color: var(--fehler-dunkel);
+  font-weight: 600;
+}
+
+details.absender-pruefung ul {
+  margin: var(--abstand-1) 0 0;
+  padding: var(--abstand-2) var(--abstand-3);
+  list-style: none;
+  border: 1px solid var(--linie);
+  border-radius: var(--radius-klein);
+  background: var(--weiss);
+}
+
+.absender-warnung {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--abstand-2);
+  margin: 0 0 var(--abstand-3);
+  padding: var(--abstand-3) var(--abstand-4);
+  border: 2px solid var(--fehler);
+  border-radius: var(--radius-gross);
+  background: var(--fehler-flaeche);
+  color: var(--fehler-dunkel);
+}
+
+.absender-warnung .symbol {
+  font-size: var(--groesse-gross);
+  line-height: 1;
+}
+
+details.erweitert {
+  margin: var(--abstand-2) 0 var(--abstand-3);
+}
+
+details.erweitert summary {
+  cursor: pointer;
+  color: var(--blau);
+  border-radius: var(--radius-klein);
+}
+
 .willkommen {
   max-width: 34rem;
   padding: var(--abstand-5);

@@ -246,6 +246,7 @@ mod tests {
             imap: server.clone(),
             smtp: server,
             gesendet_ablegen: true,
+            absender_kennung: String::new(),
         }
     }
 

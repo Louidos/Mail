@@ -24,6 +24,7 @@ Version: **0.2.1** (siehe [Releases](https://github.com/Louidos/Mail/releases))
 - [x] Sicheres Design in Blau/Weiss
 - [x] Sicherheitsprüfungen in CI (`cargo audit`, `npm audit`, Dependabot)
 - [x] Optionaler Proxy für externe Bilder
+- [x] Absender prüfen (DKIM/SPF/DMARC des eigenen Servers anzeigen, vor Fälschungen warnen)
 
 Änderungen stehen im [CHANGELOG](CHANGELOG.md).
 
@@ -39,7 +40,6 @@ Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
 **Geplant:**
 
 - [ ] Ende-zu-Ende-Verschlüsselung mit OpenPGP, später S/MIME ([#44](https://github.com/Louidos/Mail/issues/44))
-- [ ] Absender prüfen: DKIM/SPF/DMARC anzeigen und vor gefälschten Absendern warnen ([#45](https://github.com/Louidos/Mail/issues/45))
 - [ ] Dunkle Darstellung wieder anbieten, entfiel mit #31 ([#47](https://github.com/Louidos/Mail/issues/47))
 - [ ] Fertige Installationspakete für Windows, macOS und Linux in jedem Release ([#48](https://github.com/Louidos/Mail/issues/48))
 - [ ] Suche in Mails ([#49](https://github.com/Louidos/Mail/issues/49))

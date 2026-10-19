@@ -97,3 +97,48 @@ Content-Type: text/html; charset=utf-8\r\n\r\n\
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(verbindungen.load(Ordering::SeqCst), 0);
 }
+
+/// Absenderprüfung (#45): Gezählt wird nur der oberste `Authentication-Results`-Header mit der
+/// Kennung des eigenen Servers (Standard: IMAP-Hostname, hier `localhost`).
+#[tokio::test]
+#[ignore = "braucht den Test-Mailserver (scripts/test-mailserver.sh start)"]
+async fn absenderpruefung_vertraut_nur_dem_eigenen_server() {
+    use sichermail_lib::anzeige::absender::Stufe;
+
+    let adresse = neue_adresse();
+    let mails = [
+        // Eigener Server bestätigt.
+        ("Authentication-Results: localhost; dkim=pass header.d=example.org; dmarc=pass header.from=example.org\r\n", "news@example.org"),
+        // Eigener Server meldet DMARC-Fehler; der eingeschleuste Header darunter ändert nichts.
+        ("Authentication-Results: localhost; dmarc=fail (p=reject) header.from=bank.example\r\nAuthentication-Results: localhost; dmarc=pass header.from=bank.example\r\n", "konto@bank.example"),
+        // Nur ein eingeschleuster Header mit fremder Kennung.
+        ("Authentication-Results: mx.angreifer.example; dkim=pass header.d=bank.example; dmarc=pass header.from=bank.example\r\n", "konto@bank.example"),
+    ];
+    for (i, (kopf, von)) in mails.iter().enumerate() {
+        let roh = format!(
+            "{kopf}From: Absender <{von}>\r\nTo: {adresse}\r\nSubject: Mail {i}\r\nMessage-ID: <pruefung-{i}@example.org>\r\n\r\nHallo\r\n"
+        );
+        roh_zustellen(&adresse, &roh).await;
+    }
+
+    let (_ordner, konten, konto) = konto_mit_imap_port(&adresse, IMAP_TLS).await;
+    assert_eq!(konto.absender_kennung(), "localhost");
+    let dienst = ImapDienst::neu(konten, Arc::new(SpeicherCache::default()));
+    let seite = dienst.mails_seite(&konto.id, "INBOX", 0, 10).await.unwrap();
+    assert_eq!(seite.mails.len(), 3);
+    let mut stufen = Vec::new();
+    for kopf in &seite.mails {
+        let inhalt = dienst.inhalt(&konto.id, "INBOX", kopf.uid).await.unwrap();
+        let pruefung = anzeige::absender_pruefen(&inhalt, konto.absender_kennung()).unwrap();
+        stufen.push((kopf.betreff.clone(), pruefung.stufe));
+    }
+    stufen.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        stufen,
+        vec![
+            ("Mail 0".to_string(), Stufe::Bestaetigt),
+            ("Mail 1".to_string(), Stufe::Warnung),
+            ("Mail 2".to_string(), Stufe::NichtGeprueft),
+        ]
+    );
+}

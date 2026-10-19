@@ -49,7 +49,7 @@ erneuert, musst du das neue hinterlegen.
 
 ## Konto bearbeiten und löschen
 
-- **Bearbeiten**: Alle Angaben lassen sich ändern. Bleibt das Passwortfeld leer, wird das gespeicherte
+- **Bearbeiten**: Alle Angaben lassen sich ändern (unter **Erweitert** auch die Server-Kennung für die Absenderprüfung). Bleibt das Passwortfeld leer, wird das gespeicherte
   Passwort weiterverwendet. Gespeichert wird nur nach erfolgreichem Verbindungstest.
 - **Löschen**: Entfernt das Konto aus SicherMail und das Passwort aus dem Schlüsselbund.
   Die Mails auf dem Server bleiben unverändert.
@@ -90,6 +90,8 @@ SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keine
     direkt, nie über einen Proxy. Kommt dein Rechner nur über einen Proxy ins Internet, bleiben externe Bilder leer,
     bis du unter **Einstellungen** den Proxy für externe Bilder einschaltest (siehe unten).
   - **Für … immer erlauben** lädt sie bei diesem Absender künftig automatisch.
+- **Absender prüfen**: Neben dem Absender steht, ob dein Mailserver ihn mit DKIM, SPF und DMARC bestätigt hat
+  (siehe unten).
 - **Links** öffnen sich erst nach einem Klick im Standardbrowser. Beim Überfahren mit der Maus siehst du das
   echte Ziel. Zeigt der Linktext eine andere Adresse als das echte Ziel (typisch für Phishing), warnt
   SicherMail und öffnet den Link nur, wenn du **Trotzdem öffnen** wählst. Geöffnet werden nur
@@ -97,6 +99,29 @@ SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keine
 - **Anhänge** werden nur aufgelistet und nie automatisch geöffnet. Mit **Speichern unter …** legst du sie
   ab. Prüfe Dateien, bevor du sie öffnest.
 - **Nur Text anzeigen** zeigt statt der HTML-Fassung den reinen Text der Mail.
+
+### Absender prüfen (DKIM, SPF, DMARC)
+
+Absenderadressen lassen sich fälschen. Viele Mailserver prüfen deshalb beim Empfang mit DKIM, SPF und DMARC,
+ob eine Mail wirklich vom angegebenen Absender stammt, und schreiben das Ergebnis in die Kopfzeile
+`Authentication-Results`. SicherMail zeigt dieses Ergebnis neben dem Absender an – ohne selbst etwas im Internet
+abzufragen:
+
+| Anzeige | Bedeutung |
+| --- | --- |
+| ✓ **Absender bestätigt** | Dein Server hat den Absender bestätigt (DMARC bestanden, bzw. DKIM oder SPF bestanden und passend zur Absenderdomain). |
+| – **Absender nicht geprüft** | Dein Server hat kein (verwertbares) Ergebnis geliefert, oder die Absenderdomain hat keine DMARC-Regel. Das ist kein Hinweis auf Betrug, aber auch keine Bestätigung. |
+| ⚠ **Absender wahrscheinlich gefälscht** | DMARC ist fehlgeschlagen, oder DKIM und SPF sind fehlgeschlagen bzw. gehören nicht zur Absenderdomain. |
+
+- Ein Klick auf das Feld zeigt die Einzelheiten: Ergebnisse von DKIM, SPF und DMARC und die Kennung des Servers,
+  der geprüft hat.
+- Bei **wahrscheinlich gefälscht** erscheint oben ein deutlicher Warnbalken: „Der Absender ist wahrscheinlich gefälscht.
+  Antworte nicht, öffne keine Links und Anhänge, wenn du unsicher bist.“ Für solche Mails gilt die Freigabe
+  **Für … immer erlauben** nicht und wird auch nicht angeboten; **Externe Inhalte laden** für diese eine Mail geht weiterhin.
+- SicherMail vertraut nur dem Ergebnis deines eigenen Servers: dem obersten `Authentication-Results`-Header mit der
+  **Server-Kennung für die Absenderprüfung**. Standard ist der Name des IMAP-Servers. Schreibt dein Server eine andere
+  Kennung (sie steht in der Kopfzeile ganz vorne, z. B. `mx.example.org`), trägst du sie im Konto unter
+  **Bearbeiten** → **Erweitert** ein. Gmail verwendet z. B. `mx.google.com`.
 
 ## Mails schreiben
 

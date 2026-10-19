@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::anzeige::absender::Stufe;
 use crate::anzeige::extern_inhalte::ProxyAdresse;
+use crate::anzeige::AufbereiteteMail;
 use crate::fehler::Fehlermeldung;
 
 /// Gespeicherte Einstellungen.
@@ -120,6 +122,16 @@ impl EinstellungsSpeicher {
         })
         .await?;
         Ok(())
+    }
+
+    /// Gilt die dauerhafte Freigabe externer Inhalte für den Absender dieser Mail? Nie, wenn der
+    /// eigene Server den Absender als wahrscheinlich gefälscht erkannt hat (#45).
+    pub async fn extern_erlaubt_fuer(&self, mail: &AufbereiteteMail) -> bool {
+        if mail.absender_pruefung.stufe == Stufe::Warnung {
+            return false;
+        }
+        let absender = mail.von.first().map(|a| a.adresse.as_str()).unwrap_or("");
+        self.extern_erlaubt(absender).await
     }
 
     /// Nimmt einen Absender aus der Liste „externe Inhalte immer erlauben“.
@@ -248,5 +260,28 @@ mod tests {
         // Neu laden aus der Datei
         let neu = EinstellungsSpeicher::neu(ordner.path());
         assert!(neu.extern_erlaubt("ANNA@example.org").await);
+    }
+
+    #[tokio::test]
+    async fn freigabe_gilt_nicht_bei_gefaelschtem_absender() {
+        let ordner = tempfile::tempdir().unwrap();
+        let speicher = EinstellungsSpeicher::neu(ordner.path());
+        speicher
+            .extern_erlauben("konto@bank.example")
+            .await
+            .unwrap();
+        let roh = "Authentication-Results: mail.example.ch; dmarc=fail header.from=bank.example\r\n\
+From: Bank <konto@bank.example>\r\nSubject: x\r\nContent-Type: text/html\r\n\r\n<img src=\"https://t.example/p.gif\">\r\n";
+        let mut mail = crate::anzeige::aufbereiten(roh.as_bytes(), None).unwrap();
+        mail.absender_pruefung =
+            crate::anzeige::absender_pruefen(roh.as_bytes(), "mail.example.ch").unwrap();
+        assert_eq!(mail.absender_pruefung.stufe, Stufe::Warnung);
+        assert!(!speicher.extern_erlaubt_fuer(&mail).await);
+
+        // Andere Kennung: Header wird ignoriert, Freigabe gilt wie bisher.
+        mail.absender_pruefung =
+            crate::anzeige::absender_pruefen(roh.as_bytes(), "mx.anders.example").unwrap();
+        assert_eq!(mail.absender_pruefung.stufe, Stufe::NichtGeprueft);
+        assert!(speicher.extern_erlaubt_fuer(&mail).await);
     }
 }

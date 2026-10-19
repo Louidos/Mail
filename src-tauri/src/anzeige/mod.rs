@@ -4,6 +4,7 @@
 //! - HTML wird im Backend bereinigt (`html`), externe Inhalte sind standardmässig blockiert.
 //! - Anhänge werden nur aufgelistet; gespeichert werden sie ausschliesslich über „Speichern unter“.
 
+pub mod absender;
 pub mod extern_inhalte;
 pub mod html;
 
@@ -51,6 +52,8 @@ pub struct AufbereiteteMail {
     /// Wurden externe Inhalte geladen?
     pub extern_geladen: bool,
     pub anhaenge: Vec<Anhang>,
+    /// Ergebnis der Absenderprüfung des eigenen Servers (DKIM/SPF/DMARC, #45).
+    pub absender_pruefung: absender::Absenderpruefung,
 }
 
 /// Wie mit externen Inhalten umgegangen wird.
@@ -199,7 +202,17 @@ pub fn aufbereiten(
         extern_blockiert,
         extern_geladen: extern_geladen.is_some(),
         anhaenge: anhaenge(&nachricht),
+        absender_pruefung: absender::Absenderpruefung::default(),
     })
+}
+
+/// Prüft den Absender anhand des obersten `Authentication-Results`-Headers mit `kennung`.
+pub fn absender_pruefen(
+    roh: &[u8],
+    kennung: &str,
+) -> Result<absender::Absenderpruefung, Fehlermeldung> {
+    let nachricht = parsen(roh)?;
+    Ok(absender::pruefen(roh, &nachricht, kennung))
 }
 
 /// Adressen externer Bilder, die beim Blockieren entfernt würden.
