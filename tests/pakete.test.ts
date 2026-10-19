@@ -34,6 +34,8 @@ describe("Installationspakete (#48)", () => {
     expect(release).toContain("uses: ./.github/workflows/pakete.yml");
     expect(release).toMatch(/needs: \[vorbereiten, pakete\]/);
     expect(release).toContain("SHA256SUMS.txt");
+    // Pakete aus Unterordnern der Artefakte (deb/, rpm/, msi/ …) werden flach zusammengelegt.
+    expect(release).toContain("find . -mindepth 2 -type f -exec mv -n -t . {} +");
     expect(release).toContain("actions/attest-build-provenance@");
     // Tag-Logik bleibt: Commit auf main, Versionsabgleich, bestehende Tags nie verschieben.
     expect(release).toContain("git merge-base --is-ancestor HEAD origin/main");
