@@ -1,5 +1,8 @@
 //! Verschlüsselter Speicher für OpenPGP-Schlüssel (`schluessel.db`, SQLCipher).
 //!
+//! - Dieselbe Datei hält auch die S/MIME-Zertifikate (#56, Tabellen `smime_*`, siehe
+//!   `crate::smime::speicher`); die Tabellen werden beim Öffnen ergänzt, bestehende bleiben
+//!   unverändert, alte Dateien öffnen weiter.
 //! - Eigene Datei, unabhängig von „Mails lokal speichern“ und „Lokalen Speicher leeren“.
 //! - Der Datenbankschlüssel (32 Zufallsbytes) liegt nur im Schlüsselbund
 //!   (Eintrag [`PGP_SCHLUESSEL_EINTRAG`]).
@@ -8,7 +11,7 @@
 //!   (`schluessel.db.unlesbar-<Zeit>`): Private Schlüssel gibt es oft nur hier.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection};
 use zeroize::Zeroizing;
@@ -90,12 +93,14 @@ impl SchluesselSpeicher {
                  );",
             )
             .map_err(fehler)?;
+        crate::smime::speicher::tabellen_anlegen(&verbindung).map_err(fehler)?;
         Ok(Self {
             verbindung: Mutex::new(verbindung),
         })
     }
 
-    fn mit<T>(
+    /// Führt `f` mit der Datenbankverbindung aus (auch für die S/MIME-Tabellen).
+    pub(crate) fn mit<T>(
         &self,
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, Fehlermeldung> {
@@ -179,6 +184,40 @@ impl SchluesselSpeicher {
             )?;
             Ok(eigene + fremde > 0)
         })
+    }
+}
+
+/// Öffnet `schluessel.db` beim ersten Zugriff (z. B. erst, wenn der Schlüsselbund entsperrt
+/// ist). Gemeinsam für OpenPGP und S/MIME, damit es nur eine Verbindung zur Datei gibt.
+pub struct SchluesselDb {
+    ordner: PathBuf,
+    schluesselbund: Arc<dyn Schluesselbund>,
+    offen: Mutex<Option<Arc<SchluesselSpeicher>>>,
+}
+
+impl SchluesselDb {
+    pub fn neu(ordner: &Path, schluesselbund: Arc<dyn Schluesselbund>) -> Self {
+        Self {
+            ordner: ordner.to_path_buf(),
+            schluesselbund,
+            offen: Mutex::new(None),
+        }
+    }
+
+    pub fn oeffnen(&self) -> Result<Arc<SchluesselSpeicher>, Fehlermeldung> {
+        let mut offen = self
+            .offen
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Schlüsselspeicher."))?;
+        if let Some(speicher) = offen.as_ref() {
+            return Ok(speicher.clone());
+        }
+        let speicher = Arc::new(SchluesselSpeicher::mit_schluesselbund(
+            &self.ordner,
+            self.schluesselbund.as_ref(),
+        )?);
+        *offen = Some(speicher.clone());
+        Ok(speicher)
     }
 }
 

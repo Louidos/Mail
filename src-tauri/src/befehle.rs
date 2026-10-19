@@ -25,6 +25,8 @@ use crate::konto::{Konto, KontoEingabe, KontoVerwaltung, Pruefergebnis};
 use crate::pgp::lesen::{Verarbeitet, Verschluesselung};
 use crate::pgp::schluessel::SchluesselInfo;
 use crate::pgp::{PgpDienst, Uebersicht, VersandPruefung};
+use crate::smime::zertifikat::{ZertifikatInfo, MAX_ZERTIFIKATSDATEI};
+use crate::smime::SmimeDienst;
 use crate::smtp::anhaenge::{AnhangAuswahl, Eintrag, Quelle};
 use crate::smtp::dienst::{SendeDienst, SendeErgebnis};
 use crate::smtp::entwurf::Entwurf;
@@ -43,6 +45,7 @@ pub struct AppZustand {
     pub senden: Arc<SendeDienst>,
     pub schluesselbund: Arc<dyn Schluesselbund>,
     pub pgp: Arc<PgpDienst>,
+    pub smime: Arc<SmimeDienst>,
     pub datenordner: PathBuf,
     /// Hinweis, falls der verschlüsselte Speicher nicht geöffnet werden konnte.
     pub speicher_hinweis: Mutex<Option<String>>,
@@ -261,11 +264,19 @@ async fn anzeige_inhalt(
 ) -> Result<(Vec<u8>, Verarbeitet), Fehlermeldung> {
     let roh = zustand.imap.inhalt(konto, ordner, uid).await?;
     let pgp = zustand.pgp.clone();
+    let smime = zustand.smime.clone();
     let kopie = roh.clone();
     // Entschlüsseln und Schlüsselableitung brauchen Rechenzeit: nicht im Ereignis-Thread.
-    let verarbeitet = tokio::task::spawn_blocking(move || pgp.verarbeiten(&kopie))
-        .await
-        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler beim Entschlüsseln."))?;
+    let verarbeitet = tokio::task::spawn_blocking(move || {
+        // S/MIME zuerst: Eine S/MIME-signierte Mail ist auch `multipart/signed`.
+        let smime = smime.verarbeiten(&kopie);
+        if smime.status != Default::default() {
+            return smime;
+        }
+        pgp.verarbeiten(&kopie)
+    })
+    .await
+    .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler beim Entschlüsseln."))?;
     Ok((roh, verarbeitet))
 }
 
@@ -585,7 +596,7 @@ async fn blockierend<T: Send + 'static>(
 ) -> Result<T, Fehlermeldung> {
     tokio::task::spawn_blocking(arbeit)
         .await
-        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei OpenPGP."))?
+        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei der Verschlüsselung."))?
 }
 
 /// Erzeugt einen eigenen Schlüssel für ein Konto, geschützt mit der Passphrase.
@@ -605,11 +616,31 @@ async fn schluesseldatei_waehlen(
     app: &AppHandle,
     titel: &str,
 ) -> Result<Option<Zeroizing<Vec<u8>>>, Fehlermeldung> {
+    datei_waehlen(
+        app,
+        titel,
+        ("OpenPGP-Schlüssel", &["asc", "gpg", "pgp", "key"]),
+        crate::pgp::schluessel::MAX_SCHLUESSELDATEI,
+    )
+    .await
+    .map_err(|e| match e.art.as_str() {
+        "zu_gross" => Fehlermeldung::neu("pgp", "Die Schlüsseldatei ist zu gross."),
+        _ => e,
+    })
+}
+
+/// Liest eine Datei, die der Nutzer im Backend-Dialog wählt (höchstens `max` Bytes).
+async fn datei_waehlen(
+    app: &AppHandle,
+    titel: &str,
+    (filter, endungen): (&str, &[&str]),
+    max: usize,
+) -> Result<Option<Zeroizing<Vec<u8>>>, Fehlermeldung> {
     let (sender, empfaenger) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
         .set_title(titel)
-        .add_filter("OpenPGP-Schlüssel", &["asc", "gpg", "pgp", "key"])
+        .add_filter(filter, endungen)
         .pick_file(move |datei| {
             let _ = sender.send(datei);
         });
@@ -619,13 +650,10 @@ async fn schluesseldatei_waehlen(
     let pfad = datei
         .into_path()
         .map_err(|_| Fehlermeldung::neu("datei", "Ungültige Datei."))?;
-    let daten = crate::smtp::anhaenge::datei_lesen_begrenzt(
-        &pfad,
-        crate::pgp::schluessel::MAX_SCHLUESSELDATEI as u64,
-    )
-    .await
-    .map_err(|_| Fehlermeldung::neu("datei", "Die Datei konnte nicht gelesen werden."))?
-    .ok_or_else(|| Fehlermeldung::neu("pgp", "Die Schlüsseldatei ist zu gross."))?;
+    let daten = crate::smtp::anhaenge::datei_lesen_begrenzt(&pfad, max as u64)
+        .await
+        .map_err(|_| Fehlermeldung::neu("datei", "Die Datei konnte nicht gelesen werden."))?
+        .ok_or_else(|| Fehlermeldung::neu("zu_gross", "Die Datei ist zu gross."))?;
     Ok(Some(Zeroizing::new(daten)))
 }
 
@@ -752,6 +780,136 @@ pub async fn pgp_entsperren(
 ) -> Result<(), Fehlermeldung> {
     let pgp = zustand.pgp.clone();
     blockierend(move || pgp.entsperren(&fingerabdruck, &passphrase)).await
+}
+
+/// S/MIME-Zertifikate für die Oberfläche (#56).
+#[tauri::command]
+pub async fn smime_uebersicht(
+    zustand: State<'_, AppZustand>,
+) -> Result<crate::smime::Uebersicht, Fehlermeldung> {
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.uebersicht()).await
+}
+
+/// Liest eine Zertifikatsdatei, die der Nutzer im Backend-Dialog wählt.
+async fn zertifikatsdatei_waehlen(
+    app: &AppHandle,
+    titel: &str,
+    filter: (&str, &[&str]),
+) -> Result<Option<Zeroizing<Vec<u8>>>, Fehlermeldung> {
+    datei_waehlen(app, titel, filter, MAX_ZERTIFIKATSDATEI)
+        .await
+        .map_err(|e| match e.art.as_str() {
+            "zu_gross" => Fehlermeldung::neu("smime", "Die Zertifikatsdatei ist zu gross."),
+            _ => e,
+        })
+}
+
+/// Importiert ein eigenes Zertifikat mit privatem Schlüssel (`.p12`/`.pfx`, Dateidialog im
+/// Backend). `None` bei Abbruch.
+#[tauri::command]
+pub async fn smime_eigenes_importieren(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    passwort: Zeroizing<String>,
+) -> Result<Option<ZertifikatInfo>, Fehlermeldung> {
+    let konto = zustand.konten.finden(&konto).await?;
+    let Some(daten) = zertifikatsdatei_waehlen(
+        &app,
+        "Eigenes S/MIME-Zertifikat importieren",
+        ("PKCS#12 (.p12, .pfx)", &["p12", "pfx"]),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.eigenes_importieren(&konto.id, &konto.email, &daten, &passwort))
+        .await
+        .map(Some)
+}
+
+const ZERTIFIKATSDATEIEN: (&str, &[&str]) = (
+    "Zertifikate (.cer, .crt, .pem, .p7c, .der)",
+    &["cer", "crt", "pem", "p7c", "p7b", "der"],
+);
+
+/// Importiert Zertifikate anderer aus einer Datei.
+#[tauri::command]
+pub async fn smime_fremde_importieren(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+) -> Result<Vec<ZertifikatInfo>, Fehlermeldung> {
+    let Some(daten) =
+        zertifikatsdatei_waehlen(&app, "Zertifikat importieren", ZERTIFIKATSDATEIEN).await?
+    else {
+        return Ok(Vec::new());
+    };
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.fremde_importieren(&daten)).await
+}
+
+/// Übernimmt das Zertifikat des Absenders einer gültig signierten Mail.
+#[tauri::command]
+pub async fn smime_aus_mail_uebernehmen(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: String,
+    uid: u32,
+) -> Result<ZertifikatInfo, Fehlermeldung> {
+    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.aus_mail_uebernehmen(&roh)).await
+}
+
+/// Liest ein Wurzelzertifikat zur Bestätigung (noch nicht übernommen). `None` bei Abbruch.
+#[tauri::command]
+pub async fn smime_wurzel_lesen(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+) -> Result<Option<ZertifikatInfo>, Fehlermeldung> {
+    let Some(daten) =
+        zertifikatsdatei_waehlen(&app, "Wurzelzertifikat übernehmen", ZERTIFIKATSDATEIEN).await?
+    else {
+        return Ok(None);
+    };
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.wurzel_lesen(&daten))
+        .await
+        .map(Some)
+}
+
+/// Übernimmt die zuvor gelesene Wurzel, nachdem der Nutzer den Fingerabdruck bestätigt hat.
+#[tauri::command]
+pub async fn smime_wurzel_bestaetigen(
+    zustand: State<'_, AppZustand>,
+    fingerabdruck: String,
+) -> Result<ZertifikatInfo, Fehlermeldung> {
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.wurzel_bestaetigen(&fingerabdruck)).await
+}
+
+/// Löscht ein S/MIME-Zertifikat endgültig (die Oberfläche fragt vorher nach).
+#[tauri::command]
+pub async fn smime_loeschen(
+    zustand: State<'_, AppZustand>,
+    fingerabdruck: String,
+) -> Result<(), Fehlermeldung> {
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.loeschen(&fingerabdruck)).await
+}
+
+/// Entsperrt ein eigenes S/MIME-Zertifikat bis zum Programmende (Passphrase nur im
+/// Arbeitsspeicher).
+#[tauri::command]
+pub async fn smime_entsperren(
+    zustand: State<'_, AppZustand>,
+    fingerabdruck: String,
+    passphrase: Zeroizing<String>,
+) -> Result<(), Fehlermeldung> {
+    let smime = zustand.smime.clone();
+    blockierend(move || smime.entsperren(&fingerabdruck, &passphrase)).await
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ pub mod schreiben;
 pub mod speicher;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use pgp::composed::{SignedPublicKey, SignedSecretKey};
@@ -25,7 +25,7 @@ use crate::fehler::Fehlermeldung;
 use crate::konto::schluesselbund::Schluesselbund;
 use lesen::{Schluesselring, Verarbeitet};
 use schluessel::SchluesselInfo;
-use speicher::SchluesselSpeicher;
+use speicher::{SchluesselDb, SchluesselSpeicher};
 
 /// Ein eigener Schlüssel in der Übersicht.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -73,9 +73,7 @@ fn fehler(meldung: &str) -> Fehlermeldung {
 
 /// Verwaltet Schlüssel und entschlüsselt bzw. prüft Mails.
 pub struct PgpDienst {
-    ordner: PathBuf,
-    schluesselbund: Arc<dyn Schluesselbund>,
-    speicher: Mutex<Option<Arc<SchluesselSpeicher>>>,
+    db: Arc<SchluesselDb>,
     /// Fingerabdruck (Hex) → Passphrase, nur im Arbeitsspeicher.
     passphrasen: Mutex<HashMap<String, Zeroizing<String>>>,
 }
@@ -83,29 +81,20 @@ pub struct PgpDienst {
 impl PgpDienst {
     pub fn neu(ordner: &Path, schluesselbund: Arc<dyn Schluesselbund>) -> Self {
         Self {
-            ordner: ordner.to_path_buf(),
-            schluesselbund,
-            speicher: Mutex::new(None),
+            db: Arc::new(SchluesselDb::neu(ordner, schluesselbund)),
             passphrasen: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Die gemeinsame Schlüsseldatenbank (auch für S/MIME).
+    pub fn db(&self) -> Arc<SchluesselDb> {
+        self.db.clone()
     }
 
     /// Öffnet den Schlüsselspeicher beim ersten Zugriff (z. B. erst, wenn der Schlüsselbund
     /// entsperrt ist).
     fn speicher(&self) -> Result<Arc<SchluesselSpeicher>, Fehlermeldung> {
-        let mut speicher = self
-            .speicher
-            .lock()
-            .map_err(|_| fehler("Interner Fehler im Schlüsselspeicher."))?;
-        if let Some(offen) = speicher.as_ref() {
-            return Ok(offen.clone());
-        }
-        let offen = Arc::new(SchluesselSpeicher::mit_schluesselbund(
-            &self.ordner,
-            self.schluesselbund.as_ref(),
-        )?);
-        *speicher = Some(offen.clone());
-        Ok(offen)
+        self.db.oeffnen()
     }
 
     fn passphrase(&self, fingerabdruck: &str) -> Option<Zeroizing<String>> {
@@ -351,7 +340,7 @@ impl PgpDienst {
         if pruefung.eigener_fehlt {
             return Err(Fehlermeldung::neu(
                 "pgp_kein_eigener",
-                "Für dieses Konto gibt es keinen eigenen OpenPGP-Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel (OpenPGP)“.",
+                "Für dieses Konto gibt es keinen eigenen OpenPGP-Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel und Zertifikate“.",
             ));
         }
         if !pruefung.fehlende_empfaenger.is_empty() {

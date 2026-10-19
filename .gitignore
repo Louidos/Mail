@@ -14,6 +14,10 @@ coverage/
 *.p12
 *.pfx
 !tests/**/*.example.pem
+# Ausnahme: eigens erzeugte S/MIME-Test-PKI ohne echten Wert (siehe LIESMICH.md dort)
+!tests/integration/daten/smime/*.pem
+!tests/integration/daten/smime/*.key
+!tests/integration/daten/smime/*.p12
 
 # Test-Mailserver (wird von scripts/test-mailserver.sh erzeugt)
 .testserver/

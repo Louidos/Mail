@@ -1,0 +1,22 @@
+From: Bea Test <bea@example.org>
+To: Anna Test <anna@example.org>
+Subject: Unsicher des
+Date: Mon, 19 Oct 2026 10:00:00 +0200
+Message-ID: <des@example.org>
+MIME-Version: 1.0
+Content-Disposition: attachment; filename="smime.p7m"
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+
+MIIB+wYJKoZIhvcNAQcDoIIB7DCCAegCAQAxggF3MIIBcwIBADBbMEMxGDAWBgNV
+BAoMD1NpY2hlck1haWwgVGVzdDEnMCUGA1UEAwweU2ljaGVyTWFpbCBUZXN0LVp3
+aXNjaGVuc3RlbGxlAhQ+c1UeMk08/niOgcPIstA9WqD6ejANBgkqhkiG9w0BAQEF
+AASCAQChV7Wt8Edcqx4QcqHOZCjgsb5sDFhl2IEGXyGyKXOQDOBP92ZaHfdHUySh
+Pdo0kRrkqECFvGYf9zb9LCdXrGTiDrIInL7aNDW6R6CgioAJhqdjwQ54kSbBGEQY
+OZh9XAIQIRv2HFpMxxMUY6pODMJY1GGFmaIY320wTO5lkaYIo2YVNLa5eg6kQAQn
+56WIy3rmtfT6U2hNOwdygW/UPn7vK6FPQ/31wXXjuE9sHcxilPwteXAtBiN8byZU
+uLSJqwMUl4iKLSyi8KkLhyCU5LipVgq2M/D6+ty3OnbhgqzUI7nRpuWSU++IEAIn
+pnDqGyWG/ugQMqmjOnhijaw+KyfiMGgGCSqGSIb3DQEHATARBgUrDgMCBwQIFY3u
+5dV1QN2ASHI55xtcUbUADEctyWQmSmf0Tl58T94BMZLU2xFSUzaBjw02IfoWcDaB
+tKVXej5ROB4aX74Ee4yTjbQhIA43i/EwejJU2746gA==
+

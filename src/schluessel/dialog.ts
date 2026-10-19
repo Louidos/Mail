@@ -1,6 +1,7 @@
 /**
- * Dialog „Schlüssel (OpenPGP)“: eigene Schlüssel pro Konto erzeugen, importieren, exportieren und
- * löschen; öffentliche Schlüssel anderer importieren und löschen.
+ * Dialog „Schlüssel und Zertifikate“. OpenPGP: eigene Schlüssel pro Konto erzeugen, importieren,
+ * exportieren und löschen; öffentliche Schlüssel anderer importieren und löschen. Darunter der
+ * Bereich „S/MIME-Zertifikate“ (siehe `smime.ts`).
  *
  * Dateien wählt und speichert ausschliesslich das Backend (Dialoge im Backend); die Oberfläche
  * sieht nie einen privaten Schlüssel. Passphrasen werden nur durchgereicht, nie gespeichert.
@@ -9,6 +10,7 @@ import { api, fehlertext, type EigenerSchluessel, type Konto, type SchluesselInf
 import { bestaetigen, modalSchliessen, modalZeigen } from "../dialoge";
 import { el } from "../dom";
 import { datumLang } from "../postfach/format";
+import { smimeBereich } from "./smime";
 
 /** Mindestlänge der Passphrase für neue Schlüssel (das Backend prüft ebenfalls). */
 export const MIN_PASSPHRASE = 8;
@@ -34,17 +36,24 @@ function schluesselAngaben(info: SchluesselInfo): Node[] {
 export async function schluesselOeffnen(konten: Konto[]): Promise<HTMLDialogElement> {
   const status = el("p", { class: "status", role: "status", "aria-live": "polite" });
   const inhalt = el("div", {});
+  const statusSetzen = (text: string, art: "info" | "erfolg" | "fehler") => {
+    status.textContent = text;
+    status.dataset.art = art;
+  };
+  const smime = smimeBereich(konten, statusSetzen);
   const schliessen = el("button", { type: "button", class: "haupt" }, "Schliessen");
   const dialog = el(
     "dialog",
     { class: "schluessel-dialog" },
-    el("h2", {}, "Schlüssel (OpenPGP)"),
+    el("h2", {}, "Schlüssel und Zertifikate"),
+    el("h2", { class: "abschnitt" }, "OpenPGP"),
     el(
       "p",
       { class: "leise" },
       "Mit OpenPGP verschlüsselte Mails kann nur lesen, wer den passenden privaten Schlüssel hat. Private Schlüssel liegen verschlüsselt auf diesem Gerät, geschützt mit deiner Passphrase. Schlüsselserver werden nicht abgefragt.",
     ),
     inhalt,
+    smime.element,
     status,
     el("div", { class: "knoepfe" }, schliessen),
   );
@@ -53,11 +62,6 @@ export async function schluesselOeffnen(konten: Konto[]): Promise<HTMLDialogElem
     ereignis.preventDefault();
     modalSchliessen(dialog);
   });
-
-  const statusSetzen = (text: string, art: "info" | "erfolg" | "fehler") => {
-    status.textContent = text;
-    status.dataset.art = art;
-  };
 
   const loeschenFragen = async (info: SchluesselInfo, eigener: boolean) => {
     const ok = await bestaetigen({
@@ -243,6 +247,6 @@ export async function schluesselOeffnen(konten: Konto[]): Promise<HTMLDialogElem
   };
 
   modalZeigen(dialog);
-  await laden();
+  await Promise.all([laden(), smime.laden()]);
   return dialog;
 }

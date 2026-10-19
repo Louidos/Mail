@@ -20,7 +20,7 @@ export interface VerfassenOptionen {
  */
 export function versandHindernis(pruefung: VersandPruefung, verschluesseln: boolean): string | null {
   if (pruefung.eigener_fehlt) {
-    return "Für dieses Konto gibt es noch keinen eigenen Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel (OpenPGP)“.";
+    return "Für dieses Konto gibt es noch keinen eigenen Schlüssel. Erzeuge oder importiere ihn unter „Schlüssel und Zertifikate“.";
   }
   if (verschluesseln && pruefung.fehlende_empfaenger.length > 0) {
     return `Für diese Empfänger fehlt ein öffentlicher Schlüssel: ${pruefung.fehlende_empfaenger.join(", ")}. Ohne Schlüssel wird nicht gesendet – importiere ihn oder schalte „Verschlüsseln“ aus.`;

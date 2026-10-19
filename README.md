@@ -42,7 +42,8 @@ Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
 
 **Geplant:**
 
-- [ ] S/MIME-Verschlüsselung und -Signatur, Folge von #44 ([#56](https://github.com/Louidos/Mail/issues/56))
+- [ ] S/MIME-Verschlüsselung und -Signatur, Folge von #44 ([#56](https://github.com/Louidos/Mail/issues/56)) –
+  Lesen (Entschlüsseln, Signaturen prüfen) ist fertig, Senden folgt
 - [ ] Suche in Mails ([#49](https://github.com/Louidos/Mail/issues/49))
 - [ ] Gemeinsamer Posteingang für mehrere Konten ([#50](https://github.com/Louidos/Mail/issues/50))
 
@@ -157,8 +158,8 @@ Getestet wird nie gegen echte Postfächer.
 
 | Ordner                | Inhalt                                                                                         |
 | --------------------- | ---------------------------------------------------------------------------------------------- |
-| `src/`                | Frontend (TypeScript, Vite, ohne Framework): `konto/` (Konto einrichten), `postfach/` (Mailliste und Leseansicht), `verfassen/` (Schreiben, Antworten, Entwürfe), `einstellungen/`, `schluessel/` (OpenPGP-Schlüssel) |
-| `src-tauri/`          | Rust-Backend (Tauri 2); Module in `src-tauri/src/`: `konto`, `imap`, `smtp`, `speicher`, `anzeige`, `pgp`, dazu `tls` und `befehle` |
+| `src/`                | Frontend (TypeScript, Vite, ohne Framework): `konto/` (Konto einrichten), `postfach/` (Mailliste und Leseansicht), `verfassen/` (Schreiben, Antworten, Entwürfe), `einstellungen/`, `schluessel/` (OpenPGP-Schlüssel und S/MIME-Zertifikate) |
+| `src-tauri/`          | Rust-Backend (Tauri 2); Module in `src-tauri/src/`: `konto`, `imap`, `smtp`, `speicher`, `anzeige`, `pgp`, `smime`, dazu `tls` und `befehle` |
 | `public/`             | statische Dateien (Icons)                                                                      |
 | `tests/`              | Frontend-Tests (Vitest)                                                                        |
 | `tests/integration/`  | Rust-Integrationstests, u. a. gegen den Test-Mailserver (je Datei ein `[[test]]` in `src-tauri/Cargo.toml`) |

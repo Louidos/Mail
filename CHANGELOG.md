@@ -11,6 +11,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 - Dunkle Darstellung im blau-weissen Design: folgt automatisch der Systemeinstellung oder lässt sich in den Einstellungen auf „Hell“ oder „Dunkel“ festlegen (#47)
 - Jedes Release enthält fertige Installationspakete für Windows, macOS und Linux mit Prüfsummen und Herkunftsnachweis; selbst bauen ist nicht mehr nötig (#48)
+- S/MIME-Zertifikate importieren und verwalten; S/MIME-verschlüsselte Mails werden entschlüsselt und Signaturen geprüft, das Ergebnis steht gut sichtbar bei der Mail (#56)
 
 ## 0.3.0 – 2026-10-19
 

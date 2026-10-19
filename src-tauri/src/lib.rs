@@ -7,6 +7,7 @@
 //! - `speicher`: verschlüsselter lokaler Zwischenspeicher (SQLCipher)
 //! - `anzeige`: Mails sicher zur Anzeige aufbereiten
 //! - `pgp`: OpenPGP-Schlüssel verwalten, Mails entschlüsseln und Signaturen prüfen
+//! - `smime`: S/MIME-Zertifikate verwalten, Mails entschlüsseln und Signaturen prüfen
 //! - `tls`: gemeinsame TLS-Regeln (nur rustls, mindestens TLS 1.2, Zertifikate immer geprüft)
 
 pub mod anzeige;
@@ -17,6 +18,7 @@ pub mod fehler;
 pub mod imap;
 pub mod konto;
 pub mod pgp;
+pub mod smime;
 pub mod smtp;
 pub mod speicher;
 pub mod tls;
@@ -99,6 +101,8 @@ pub fn run() {
             let beobachter = Arc::new(Beobachter::default());
             // OpenPGP-Schlüssel: eigener verschlüsselter Speicher, unabhängig vom Mailspeicher.
             let pgp = Arc::new(pgp::PgpDienst::neu(&ordner, schluesselbund.clone()));
+            // S/MIME teilt sich die Schlüsseldatenbank mit OpenPGP.
+            let smime = Arc::new(smime::SmimeDienst::neu(pgp.db()));
             let senden = Arc::new(
                 smtp::dienst::SendeDienst::neu(konten.clone(), imap.clone()).mit_pgp(pgp.clone()),
             );
@@ -129,6 +133,7 @@ pub fn run() {
                 senden,
                 schluesselbund,
                 pgp,
+                smime,
                 datenordner: ordner,
                 speicher_hinweis: std::sync::Mutex::new(speicher_hinweis),
             });
@@ -171,6 +176,14 @@ pub fn run() {
             befehle::pgp_loeschen,
             befehle::pgp_entsperren,
             befehle::pgp_versand_pruefen,
+            befehle::smime_uebersicht,
+            befehle::smime_eigenes_importieren,
+            befehle::smime_fremde_importieren,
+            befehle::smime_aus_mail_uebernehmen,
+            befehle::smime_wurzel_lesen,
+            befehle::smime_wurzel_bestaetigen,
+            befehle::smime_loeschen,
+            befehle::smime_entsperren,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");
