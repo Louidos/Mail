@@ -11,6 +11,37 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+/// Höchstmenge an Bilddaten (Bytes der `data:`-Adressen), die durch *wiederholte*
+/// Verwendung desselben Bildes eingesetzt wird. Jedes Bild wird beim ersten Vorkommen
+/// immer eingesetzt (seine Grösse ist durch die Mail bzw. das Laden begrenzt); erst
+/// jede weitere Kopie zählt gegen dieses Budget. Sonst könnte eine kleine Mail mit
+/// tausenden Verweisen auf ein grosses Bild beim Öffnen den Speicher füllen.
+const MAX_WIEDERHOLTE_BILDDATEN: usize = 16 * 1024 * 1024;
+
+/// Merkt sich, welche Bilder schon eingesetzt wurden und wie viel Budget übrig ist.
+struct Bildbudget {
+    eingesetzt: HashSet<String>,
+    rest: usize,
+}
+
+impl Bildbudget {
+    fn neu() -> Self {
+        Self {
+            eingesetzt: HashSet::new(),
+            rest: MAX_WIEDERHOLTE_BILDDATEN,
+        }
+    }
+
+    /// Gibt die `data:`-Adresse zurück, wenn sie (noch) eingesetzt werden darf.
+    fn einsetzen(&mut self, schluessel: &str, daten: &str) -> Option<String> {
+        if self.eingesetzt.insert(schluessel.to_string()) {
+            return Some(daten.to_string());
+        }
+        self.rest = self.rest.checked_sub(daten.len())?;
+        Some(daten.to_string())
+    }
+}
+
 /// Ergebnis der Bereinigung.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BereinigtesHtml {
@@ -80,6 +111,7 @@ pub fn bereinigen(
 ) -> BereinigtesHtml {
     let blockiert = Arc::new(Mutex::new(Vec::<String>::new()));
     let blockiert_kopie = blockiert.clone();
+    let budget = Mutex::new(Bildbudget::neu());
     let eingebettet = eingebettet.clone();
     let extern_geladen = extern_geladen.cloned();
 
@@ -138,9 +170,13 @@ pub fn bereinigen(
             ("img", "src") => {
                 let wert_klein = wert.trim().to_ascii_lowercase();
                 if let Some(cid) = wert_klein.strip_prefix("cid:") {
-                    return eingebettet
-                        .get(cid.trim_matches(|c| c == '<' || c == '>'))
-                        .map(|daten| daten.clone().into());
+                    let cid = cid.trim_matches(|c| c == '<' || c == '>');
+                    let daten = eingebettet.get(cid)?;
+                    return budget
+                        .lock()
+                        .ok()?
+                        .einsetzen(&format!("cid:{cid}"), daten)
+                        .map(Into::into);
                 }
                 if ist_erlaubtes_datenbild(wert) {
                     return Some(wert.into());
@@ -148,7 +184,13 @@ pub fn bereinigen(
                 if ist_extern(wert) {
                     if let Some(geladen) = extern_geladen.as_ref().and_then(|m| m.get(wert.trim()))
                     {
-                        return Some(geladen.clone().into());
+                        let eingesetzt = budget
+                            .lock()
+                            .ok()
+                            .and_then(|mut b| b.einsetzen(wert.trim(), geladen));
+                        if let Some(daten) = eingesetzt {
+                            return Some(daten.into());
+                        }
                     }
                     if let Ok(mut liste) = blockiert_kopie.lock() {
                         liste.push(wert.trim().to_string());
@@ -276,6 +318,40 @@ mod tests {
         assert!(ergebnis.blockiert.is_empty());
         assert!(ergebnis.html.contains("data:image/gif;base64,R0lGODlh"));
         assert!(!ergebnis.html.contains("https://tracker.example"));
+    }
+
+    #[test]
+    fn wiederholte_bilder_fuellen_den_speicher_nicht() {
+        // 1 MB Bild, 200 Verweise darauf: ohne Grenze wären das rund 200 MB HTML.
+        let gross = format!("data:image/png;base64,{}", "A".repeat(1024 * 1024));
+        let eingebettet = HashMap::from([("bild@mail".to_string(), gross.clone())]);
+        let html = r#"<img src="cid:bild@mail">"#.repeat(200);
+        let ergebnis = bereinigen(&html, &eingebettet, None);
+        assert!(ergebnis.html.len() <= MAX_WIEDERHOLTE_BILDDATEN + 2 * gross.len());
+        // Das Bild selbst wird angezeigt (mindestens einmal und mehrfach im Budget).
+        assert!(ergebnis.html.matches(&gross).count() >= 2);
+
+        // Dasselbe für geladene externe Bilder; was nicht mehr passt, gilt als blockiert.
+        let adresse = "https://bilder.example/gross.png";
+        let geladen = HashMap::from([(adresse.to_string(), gross.clone())]);
+        let html = format!(r#"<img src="{adresse}">"#).repeat(200);
+        let ergebnis = bereinigen(&html, &HashMap::new(), Some(&geladen));
+        assert!(ergebnis.html.len() <= MAX_WIEDERHOLTE_BILDDATEN + 2 * gross.len());
+        assert!(!ergebnis.blockiert.is_empty());
+    }
+
+    #[test]
+    fn verschiedene_bilder_werden_alle_eingesetzt() {
+        let bild = |n: usize| format!("data:image/png;base64,{}{n}", "A".repeat(4 * 1024 * 1024));
+        let eingebettet: HashMap<String, String> =
+            (0..6).map(|n| (format!("b{n}@mail"), bild(n))).collect();
+        let html: String = (0..6)
+            .map(|n| format!(r#"<img src="cid:b{n}@mail">"#))
+            .collect();
+        let ergebnis = bereinigen(&html, &eingebettet, None);
+        for n in 0..6 {
+            assert!(ergebnis.html.contains(&bild(n)), "Bild {n} fehlt");
+        }
     }
 
     #[test]
