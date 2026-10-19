@@ -28,6 +28,9 @@ function formular(): HTMLFormElement {
     zertifikat.name = `${art}_zertifikat`;
     form.append(zertifikat);
   }
+  const kennung = document.createElement("input");
+  kennung.name = "absender_kennung";
+  form.append(kennung);
   const ablegen = document.createElement("input");
   ablegen.type = "checkbox";
   ablegen.name = "gesendet_ablegen";
@@ -43,6 +46,7 @@ const konto: Konto = {
   imap: { host: "imap.example.org", port: 993, verschluesselung: "tls" },
   smtp: { host: "smtp.example.org", port: 587, verschluesselung: "starttls", zertifikat: "PEM" },
   gesendet_ablegen: false,
+  absender_kennung: "mx.example.org",
 };
 
 const gueltig: KontoEingabe = { ...konto, passwort: "geheim" };
@@ -90,5 +94,7 @@ describe("eingabePruefen", () => {
       /IMAP-Server/,
     );
     expect(eingabePruefen({ ...gueltig, smtp: { ...gueltig.smtp, port: 70000 } }, true)).toMatch(/SMTP-Port/);
+    expect(eingabePruefen({ ...gueltig, absender_kennung: "mx.example.org; x" }, true)).toMatch(/Server-Kennung/);
+    expect(eingabePruefen({ ...gueltig, absender_kennung: "" }, true)).toBeNull();
   });
 });

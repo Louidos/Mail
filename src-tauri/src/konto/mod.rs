@@ -56,6 +56,20 @@ pub struct Konto {
     /// Server das selbst tut (sonst liegen sie doppelt dort).
     #[serde(default = "standard_an")]
     pub gesendet_ablegen: bool,
+    /// Server-Kennung (authserv-id) für die Absenderprüfung (#45). Leer heisst: Hostname des
+    /// IMAP-Servers.
+    #[serde(default)]
+    pub absender_kennung: String,
+}
+
+impl Konto {
+    /// Kennung, deren `Authentication-Results`-Header vertraut wird.
+    pub fn absender_kennung(&self) -> &str {
+        match self.absender_kennung.trim() {
+            "" => self.imap.host.trim(),
+            kennung => kennung,
+        }
+    }
 }
 
 fn standard_an() -> bool {
@@ -78,6 +92,8 @@ pub struct KontoEingabe {
     pub smtp: ServerEinstellung,
     #[serde(default = "standard_an")]
     pub gesendet_ablegen: bool,
+    #[serde(default)]
+    pub absender_kennung: String,
 }
 
 // Eigene Debug-Ausgabe, damit das Passwort nie in Logs oder Fehlermeldungen landet.
@@ -92,6 +108,7 @@ impl fmt::Debug for KontoEingabe {
             .field("imap", &self.imap)
             .field("smtp", &self.smtp)
             .field("gesendet_ablegen", &self.gesendet_ablegen)
+            .field("absender_kennung", &self.absender_kennung)
             .finish()
     }
 }
@@ -114,6 +131,14 @@ impl KontoEingabe {
         }
         if self.benutzername.trim().is_empty() {
             return fehler("Bitte einen Benutzernamen angeben.");
+        }
+        let kennung = self.absender_kennung.trim();
+        if kennung.len() > 255
+            || kennung
+                .chars()
+                .any(|z| z.is_whitespace() || z.is_control() || matches!(z, ';' | '(' | ')' | '"'))
+        {
+            return fehler("Bitte eine gültige Server-Kennung für die Absenderprüfung angeben (z. B. mail.example.org) oder das Feld leer lassen.");
         }
         for (art, server) in [("IMAP", &self.imap), ("SMTP", &self.smtp)] {
             let host = server.host.trim();
@@ -156,6 +181,7 @@ impl KontoEingabe {
             imap: saeubern(&self.imap),
             smtp: saeubern(&self.smtp),
             gesendet_ablegen: self.gesendet_ablegen,
+            absender_kennung: self.absender_kennung.trim().to_string(),
         }
     }
 }
@@ -331,7 +357,23 @@ mod tests {
                 zertifikat: None,
             },
             gesendet_ablegen: true,
+            absender_kennung: String::new(),
         }
+    }
+
+    #[test]
+    fn absender_kennung_ist_standardmaessig_der_imap_server() {
+        let mut konto = beispiel_eingabe().in_konto("k1".into());
+        assert_eq!(konto.absender_kennung(), "imap.example.org");
+        konto.absender_kennung = "mx.example.org".into();
+        assert_eq!(konto.absender_kennung(), "mx.example.org");
+
+        let mut e = beispiel_eingabe();
+        e.absender_kennung = "mx.example.org; boese".into();
+        assert!(e.pruefen().is_err());
+        e.absender_kennung = "  mx.example.org ".into();
+        assert!(e.pruefen().is_ok());
+        assert_eq!(e.in_konto("k".into()).absender_kennung, "mx.example.org");
     }
 
     #[test]

@@ -139,6 +139,22 @@ export function kontoDialogOeffnen(konto: Konto | null, gespeichert: (konto: Kon
       el("input", { type: "checkbox", name: "gesendet_ablegen", checked: true }),
       "Gesendete Mails im Ordner „Gesendet“ ablegen (ausschalten, wenn der Server das selbst tut)",
     ),
+    el(
+      "details",
+      { class: "erweitert" },
+      el("summary", {}, "Erweitert"),
+      feld(
+        "Server-Kennung für die Absenderprüfung",
+        el("input", {
+          name: "absender_kennung",
+          type: "text",
+          autocomplete: "off",
+          spellcheck: "false",
+          placeholder: "leer = Name des IMAP-Servers",
+        }),
+        "SicherMail zeigt nur die Absenderprüfung (DKIM, SPF, DMARC) an, die dein Mailserver mit dieser Kennung in die Kopfzeile „Authentication-Results“ schreibt. Meist ist das der Name des IMAP-Servers; sonst steht sie in dieser Kopfzeile ganz vorne.",
+      ),
+    ),
     status,
     el("div", { class: "knoepfe" }, abbrechenKnopf, testKnopf, speichernKnopf),
   );

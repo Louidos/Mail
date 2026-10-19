@@ -57,6 +57,15 @@ const einfacheMail = {
   extern_blockiert: 0,
   extern_geladen: false,
   anhaenge: [],
+  absender_pruefung: {
+    stufe: "nicht_geprueft",
+    kennung: "imap.example.org",
+    gefunden: false,
+    absender_domain: null,
+    dkim: [],
+    spf: null,
+    dmarc: null,
+  },
 };
 
 /** Antworten des Backends je Befehl. */
@@ -261,6 +270,28 @@ describe("Leseansicht", () => {
     extern_blockiert: 2,
     extern_geladen: false,
     anhaenge: [{ index: 0, name: "Rechnung.pdf", typ: "application/pdf", groesse: 2048 }],
+    absender_pruefung: {
+      stufe: "bestaetigt",
+      kennung: "mail.example.org",
+      gefunden: true,
+      absender_domain: "example.org",
+      dkim: [{ ergebnis: "pass", domain: "example.org", passend: true }],
+      spf: { ergebnis: "pass", domain: "example.org", passend: true },
+      dmarc: { ergebnis: "pass", domain: "example.org", passend: true },
+    },
+  };
+
+  const gefaelscht = {
+    ...aufbereitet,
+    absender_pruefung: {
+      stufe: "warnung",
+      kennung: "mail.example.org",
+      gefunden: true,
+      absender_domain: "example.org",
+      dkim: [{ ergebnis: "fail", domain: "example.org", passend: true }],
+      spf: { ergebnis: "fail", domain: "example.org", passend: true },
+      dmarc: { ergebnis: "fail", domain: "example.org", passend: true },
+    },
   };
 
   async function oeffnen(antworten: Record<string, unknown> = {}) {
@@ -347,5 +378,45 @@ describe("Leseansicht", () => {
     await app.linkKlick({ href: "https://example.org/", text: "Zur Webseite" });
     expect(document.querySelector("dialog.bestaetigen")).toBeNull();
     expect(invoke).toHaveBeenCalledWith("link_oeffnen", { url: "https://example.org/" });
+  });
+
+  it("zeigt beim Absender, dass der eigene Server ihn bestätigt hat, mit Einzelheiten", async () => {
+    const { wurzel } = await oeffnen();
+    const feld = wurzel.querySelector("details.absender-pruefung") as HTMLDetailsElement;
+    expect(feld.dataset.stufe).toBe("bestaetigt");
+    expect(feld.querySelector("summary")?.textContent).toBe("✓Absender bestätigt");
+    expect(feld.textContent).toContain("DKIM: pass für example.org");
+    expect(feld.textContent).toContain("SPF: pass für example.org");
+    expect(feld.textContent).toContain("DMARC: pass für example.org");
+    expect(feld.textContent).toContain("Geprüft von: mail.example.org");
+    expect(wurzel.querySelector(".absender-warnung")).toBeNull();
+  });
+
+  it("zeigt „nicht geprüft“, wenn der eigene Server kein Ergebnis liefert", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        absender_pruefung: { ...einfacheMail.absender_pruefung, kennung: "mail.example.org" },
+      },
+    });
+    const feld = wurzel.querySelector("details.absender-pruefung") as HTMLDetailsElement;
+    expect(feld.dataset.stufe).toBe("nicht_geprueft");
+    expect(feld.querySelector("summary")?.textContent).toContain("Absender nicht geprüft");
+    expect(feld.textContent).toContain("Kein Prüfergebnis deines Servers (Kennung „mail.example.org“) gefunden.");
+  });
+
+  it("warnt deutlich vor gefälschten Absendern und bietet keine dauerhafte Freigabe an", async () => {
+    const { wurzel } = await oeffnen({ mail_anzeigen: gefaelscht });
+    const warnung = wurzel.querySelector(".absender-warnung") as HTMLElement;
+    expect(warnung.getAttribute("role")).toBe("alert");
+    expect(warnung.textContent).toContain("⚠");
+    expect(warnung.textContent).toContain(
+      "Der Absender ist wahrscheinlich gefälscht. Antworte nicht, öffne keine Links und Anhänge, wenn du unsicher bist.",
+    );
+    const feld = wurzel.querySelector("details.absender-pruefung") as HTMLDetailsElement;
+    expect(feld.querySelector("summary")?.textContent).toContain("Absender wahrscheinlich gefälscht");
+    const knoepfe = [...wurzel.querySelectorAll(".extern-leiste button")].map((k) => k.textContent);
+    expect(knoepfe).toEqual(["Externe Inhalte laden"]);
+    expect(wurzel.textContent).not.toContain("immer erlauben");
   });
 });

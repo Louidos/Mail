@@ -53,6 +53,7 @@ export function formularLesen(form: HTMLFormElement, id: string | null): KontoEi
     imap: serverLesen(form, "imap"),
     smtp: serverLesen(form, "smtp"),
     gesendet_ablegen: ablegen instanceof HTMLInputElement ? ablegen.checked : true,
+    absender_kennung: wert(form, "absender_kennung").trim(),
   };
 }
 
@@ -74,6 +75,7 @@ export function formularFuellen(form: HTMLFormElement, konto: Konto): void {
   serverFuellen(form, "smtp", konto.smtp);
   const ablegen = form.elements.namedItem("gesendet_ablegen");
   if (ablegen instanceof HTMLInputElement) ablegen.checked = konto.gesendet_ablegen;
+  setzen(form, "absender_kennung", konto.absender_kennung ?? "");
 }
 
 /**
@@ -95,6 +97,9 @@ export function eingabePruefen(eingabe: KontoEingabe, neu: boolean): string | nu
     if (!Number.isInteger(server.port) || server.port < 1 || server.port > 65535) {
       return `Bitte einen gültigen ${art}-Port angeben.`;
     }
+  }
+  if (eingabe.absender_kennung.length > 255 || /[\s;()"]/.test(eingabe.absender_kennung)) {
+    return "Bitte eine gültige Server-Kennung für die Absenderprüfung angeben (z. B. mail.example.org) oder das Feld leer lassen.";
   }
   return null;
 }

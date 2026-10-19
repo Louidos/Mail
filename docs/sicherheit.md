@@ -72,7 +72,18 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
   Namen löst der Proxy selbst auf. Zeigt ein solcher Name auf eine Adresse im eigenen Netz, kann SicherMail das nicht
   mehr erkennen. Der Einstellungsdialog sagt das deutlich.
 - Die Freigabe „für diesen Absender immer erlauben“ hängt an der Absenderadresse, die gefälscht sein kann; die
-  Oberfläche weist darauf hin.
+  Oberfläche weist darauf hin. Erkennt die Absenderprüfung einen wahrscheinlich gefälschten Absender, gilt die Freigabe
+  nicht und wird nicht angeboten.
+- **Absenderprüfung** (DKIM/SPF/DMARC): SicherMail wertet nur den `Authentication-Results`-Header (RFC 8601) des
+  eigenen Servers aus – keine DNS-Abfragen, keine Verbindungen. Vertraut wird ausschliesslich dem **obersten** Header
+  mit der Server-Kennung (authserv-id) des Kontos (Standard: Name des IMAP-Servers). Header mit fremder Kennung und
+  weiter unten stehende Header mit derselben Kennung (z. B. vom Absender eingeschleust) werden ignoriert. Kommentare,
+  Gross-/Kleinschreibung und gefaltete Zeilen werden beim Lesen berücksichtigt. Drei Stufen: bestätigt, nicht geprüft,
+  Warnung (Symbol und Text, nicht nur Farbe). **Grenze:** Das wirkt nur, wenn der eigene Server tatsächlich prüft und
+  von aussen kommende `Authentication-Results`-Header mit seiner Kennung entfernt oder seinen eigenen Header darüber
+  setzt (RFC 8601, Abschnitt 5). Prüft er nicht, steht „nicht geprüft“. Schreibt der Server mehrere Header (z. B.
+  Postfix mit OpenDKIM und OpenDMARC getrennt), zählt nur der oberste. Die Ausrichtung von DKIM-/SPF-Domain zur
+  Absenderdomain ist vereinfacht (gleiche Domain oder Subdomain, ohne Public Suffix List).
 - Links öffnen sich erst nach einem Klick im Standardbrowser (nur `https:`, `http:`, `mailto:`). Weicht der angezeigte
   Text von der echten Adresse ab (oder enthält die Adresse Punycode), warnt SicherMail. Geprüft wird der sichtbare,
   vereinheitlichte Text ohne unsichtbare Zeichen; jede Adresse im Linktext zählt, nicht nur ein reiner Adresstext.
@@ -122,7 +133,9 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 
 - **Keine Ende-zu-Ende-Verschlüsselung** (OpenPGP, S/MIME): Mails liegen auf dem Server so, wie der Server sie
   speichert. Kommt später in einem eigenen Auftrag.
-- **Keine Signaturprüfung** von Absendern (DKIM/SPF/DMARC werden nicht angezeigt); Absenderadressen können gefälscht sein.
+- **Keine eigene Absenderprüfung**: DKIM, SPF und DMARC prüft SicherMail nicht selbst (keine DNS-Abfragen), sondern
+  zeigt nur das Ergebnis des eigenen Servers. Ohne dieses Ergebnis bleibt ein Absender „nicht geprüft“ und kann
+  gefälscht sein.
 - **Schutz nur so gut wie das Gerät**: Wer den entsperrten Rechner bzw. den entsperrten Schlüsselbund kontrolliert,
   kann Passwörter und lokale Mails lesen. Der Arbeitsspeicher des laufenden Programms ist nicht gesondert geschützt.
 - **Metadaten**: Server und Netzbetreiber sehen, wann und mit welchem Server verbunden wird.

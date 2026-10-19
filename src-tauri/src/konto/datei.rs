@@ -73,6 +73,7 @@ mod tests {
             imap: server.clone(),
             smtp: server,
             gesendet_ablegen: true,
+            absender_kennung: String::new(),
         }
     }
 
@@ -114,6 +115,8 @@ mod tests {
         .unwrap();
         let konten = laden(&pfad).unwrap();
         assert!(konten[0].gesendet_ablegen);
+        assert!(konten[0].absender_kennung.is_empty());
+        assert_eq!(konten[0].absender_kennung(), "i.example.org");
     }
 
     #[test]

@@ -39,6 +39,8 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   unter Unix mit Rechten `0600`.
 - Passwörter im Schlüsselbund (Crate `keyring`, Dienst „SicherMail“, Eintrag `konto:<id>`).
 - Gespeichert wird erst nach erfolgreichem Verbindungstest zu IMAP und SMTP.
+- Optional pro Konto: `absender_kennung` (Server-Kennung für die Absenderprüfung; leer = IMAP-Host). Ältere
+  `konten.json` ohne das Feld laden unverändert.
 
 ## Tauri-Sicherheit
 
@@ -94,6 +96,12 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   auf `about:blank#sichermail-link-<n>` umgeschrieben; ein Klick lädt nur ein leeres Dokument im iframe,
   das Hauptfenster erkennt die Marke, stellt den Inhalt wieder her, prüft den Link (`linkPruefen`) und
   öffnet ihn über den Backend-Befehl `link_oeffnen` im Standardbrowser.
+- **Absenderprüfung** (`absender`, #45): liest alle `Authentication-Results`-Header roh (mit `mail-parser`-Offsets),
+  entfernt Kommentare und Leerraum, teilt nach RFC 8601 in authserv-id und `methode=ergebnis` mit Eigenschaften
+  (`header.d`, `header.i`, `smtp.mailfrom`, `header.from`). Ausgewertet wird nur der oberste Header mit der Kennung des
+  Kontos (`Konto::absender_kennung()`, Standard IMAP-Host). `bewerten()` ist eine reine Funktion und ergibt die Stufe
+  (`bestaetigt`, `nicht_geprueft`, `warnung`); sie steht in `AufbereiteteMail::absender_pruefung`.
+  `EinstellungsSpeicher::extern_erlaubt_fuer` lässt die dauerhafte Freigabe externer Inhalte bei `warnung` nicht gelten.
 - **Anhänge** speichert der Backend-Befehl `anhang_speichern` über den Dialog „Speichern unter“ (Dateiname
   gesäubert). Das Frontend hat weder Dialog- noch Dateisystemrechte.
 

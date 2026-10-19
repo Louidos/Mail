@@ -22,6 +22,8 @@ export interface Konto {
   smtp: ServerEinstellung;
   /** Gesendete Mails im Ordner „Gesendet“ ablegen. */
   gesendet_ablegen: boolean;
+  /** Server-Kennung für die Absenderprüfung; leer heisst: IMAP-Server. */
+  absender_kennung: string;
 }
 
 export interface KontoEingabe {
@@ -34,6 +36,7 @@ export interface KontoEingabe {
   imap: ServerEinstellung;
   smtp: ServerEinstellung;
   gesendet_ablegen: boolean;
+  absender_kennung: string;
 }
 
 export interface Fehlermeldung {
@@ -101,6 +104,30 @@ export interface Anhang {
   groesse: number;
 }
 
+/** Stufe der Absenderprüfung (#45). */
+export type AbsenderStufe = "bestaetigt" | "nicht_geprueft" | "warnung";
+
+/** Ergebnis einer Prüfmethode (DKIM, SPF oder DMARC). */
+export interface PruefMethode {
+  ergebnis: string;
+  domain: string | null;
+  /** Passt die Domain zur Absenderdomain? */
+  passend: boolean;
+}
+
+/** Ergebnis der Absenderprüfung des eigenen Servers. */
+export interface Absenderpruefung {
+  stufe: AbsenderStufe;
+  /** Server-Kennung (authserv-id), der vertraut wird. */
+  kennung: string;
+  /** Wurde ein Prüfergebnis mit dieser Kennung gefunden? */
+  gefunden: boolean;
+  absender_domain: string | null;
+  dkim: PruefMethode[];
+  spf: PruefMethode | null;
+  dmarc: PruefMethode | null;
+}
+
 /** Vom Backend bereinigte Mail. */
 export interface AufbereiteteMail {
   betreff: string;
@@ -117,6 +144,7 @@ export interface AufbereiteteMail {
   extern_blockiert: number;
   extern_geladen: boolean;
   anhaenge: Anhang[];
+  absender_pruefung: Absenderpruefung;
 }
 
 export interface Einstellungen {

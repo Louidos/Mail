@@ -1,5 +1,5 @@
 /** Leseansicht: Kopfdaten, Aktionen und sicher dargestellter Inhalt einer Mail. */
-import type { Adresse, AufbereiteteMail, MailKopf, Ordner } from "../api";
+import type { Absenderpruefung, AbsenderStufe, Adresse, AufbereiteteMail, MailKopf, Ordner, PruefMethode } from "../api";
 import { el } from "../dom";
 import { datumLang, groesse } from "./format";
 import { linksAbfangen, mailRahmenMitLinks, textMitLinks, type LinkKlick } from "./sicher";
@@ -33,6 +33,62 @@ export function adresseText(adresse: Adresse): string {
   return adresse.name ? `${adresse.name} <${adresse.adresse}>` : adresse.adresse;
 }
 
+/** Text des Warnbalkens bei wahrscheinlich gefälschtem Absender. */
+export const ABSENDER_WARNUNG =
+  "Der Absender ist wahrscheinlich gefälscht. Antworte nicht, öffne keine Links und Anhänge, wenn du unsicher bist.";
+
+/** Symbol und Text je Stufe – nie nur über die Farbe erkennbar. */
+const STUFEN: Record<AbsenderStufe, { symbol: string; text: string }> = {
+  bestaetigt: { symbol: "✓", text: "Absender bestätigt" },
+  nicht_geprueft: { symbol: "–", text: "Absender nicht geprüft" },
+  warnung: { symbol: "⚠", text: "Absender wahrscheinlich gefälscht" },
+};
+
+function methodeText(name: string, methode: PruefMethode | null | undefined): string {
+  if (!methode) return `${name}: kein Ergebnis`;
+  const domain = methode.domain ? ` für ${methode.domain}` : "";
+  const passend = methode.domain && !methode.passend ? " (passt nicht zur Absenderdomain)" : "";
+  return `${name}: ${methode.ergebnis}${domain}${passend}`;
+}
+
+/**
+ * Kleines Feld beim Absender mit dem Ergebnis der Absenderprüfung. Ein Klick klappt die
+ * Einzelheiten auf (DKIM, SPF, DMARC und die prüfende Server-Kennung).
+ */
+export function absenderFeld(pruefung: Absenderpruefung): HTMLDetailsElement {
+  const stufe = STUFEN[pruefung.stufe] ?? STUFEN.nicht_geprueft;
+  const zeilen: string[] = [];
+  if (pruefung.gefunden) {
+    zeilen.push(
+      ...(pruefung.dkim.length > 0
+        ? pruefung.dkim.map((m) => methodeText("DKIM", m))
+        : [methodeText("DKIM", null)]),
+      methodeText("SPF", pruefung.spf),
+      methodeText("DMARC", pruefung.dmarc),
+      `Geprüft von: ${pruefung.kennung}`,
+    );
+  } else {
+    zeilen.push(
+      pruefung.kennung
+        ? `Kein Prüfergebnis deines Servers (Kennung „${pruefung.kennung}“) gefunden.`
+        : "Keine Server-Kennung für die Absenderprüfung eingestellt.",
+      "Absenderadressen lassen sich fälschen.",
+    );
+  }
+  if (pruefung.absender_domain) zeilen.push(`Absenderdomain: ${pruefung.absender_domain}`);
+  return el(
+    "details",
+    { class: "absender-pruefung", "data-stufe": pruefung.stufe },
+    el(
+      "summary",
+      { title: "Einzelheiten zur Absenderprüfung" },
+      el("span", { class: "symbol", "aria-hidden": "true" }, stufe.symbol),
+      stufe.text,
+    ),
+    el("ul", {}, ...zeilen.map((zeile) => el("li", {}, zeile))),
+  );
+}
+
 function inhaltBereich(
   inhalt: Inhalt,
   optionen: LeseOptionen,
@@ -45,10 +101,12 @@ function inhaltBereich(
   const teile: Node[] = [];
 
   const absender = mail.von[0]?.adresse ?? "";
+  // Bei wahrscheinlich gefälschtem Absender keine dauerhafte Freigabe anbieten (#45).
+  const gefaelscht = mail.absender_pruefung?.stufe === "warnung";
   if (mail.html && !optionen.nurText && mail.extern_blockiert > 0 && !mail.extern_geladen) {
     const laden = el("button", { type: "button", class: "klein" }, "Externe Inhalte laden");
     laden.addEventListener("click", () => aktionen.externLaden());
-    const immer = absender
+    const immer = absender && !gefaelscht
       ? el(
           "button",
           {
@@ -171,7 +229,11 @@ export function leseansicht(
       ? `${kopf.absender} <${kopf.absender_adresse}>`
       : kopf.absender_adresse || kopf.absender || "(unbekannt)";
 
-  const kopfdaten: Node[] = [el("dt", {}, "Von"), el("dd", {}, von)];
+  const pruefung = mail?.absender_pruefung;
+  const kopfdaten: Node[] = [
+    el("dt", {}, "Von"),
+    el("dd", { class: "von" }, el("span", {}, von), pruefung ? absenderFeld(pruefung) : null),
+  ];
   if (mail?.an.length) kopfdaten.push(el("dt", {}, "An"), el("dd", {}, mail.an.map(adresseText).join(", ")));
   if (mail?.cc.length) kopfdaten.push(el("dt", {}, "Cc"), el("dd", {}, mail.cc.map(adresseText).join(", ")));
   kopfdaten.push(el("dt", {}, "Datum"), el("dd", {}, datumLang(mail?.datum ?? kopf.datum)));
@@ -190,6 +252,15 @@ export function leseansicht(
       loeschenKnopf,
       el("label", { class: "umschalter" }, nurText, "Nur Text anzeigen"),
     ),
+    pruefung?.stufe === "warnung"
+      ? el(
+          "div",
+          { class: "absender-warnung", role: "alert" },
+          el("span", { class: "symbol", "aria-hidden": "true" }, "⚠"),
+          el("strong", {}, "Achtung: "),
+          ABSENDER_WARNUNG,
+        )
+      : null,
     el("h2", { class: "betreff" }, mail?.betreff || kopf.betreff || "(kein Betreff)"),
     el("dl", { class: "kopfdaten" }, ...kopfdaten),
     inhaltBereich(inhalt, optionen, aktionen),

@@ -10,6 +10,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 ### Hinzugefügt
 
 - Neue Einstellung „Proxy für externe Bilder verwenden“ (standardmässig aus): Wer nur über einen Proxy ins Internet kommt, kann externe Bilder wieder laden; der Dialog erklärt, welcher Schutz dabei wegfällt (#46)
+- SicherMail zeigt beim Absender, ob dein Mailserver ihn mit DKIM, SPF und DMARC bestätigt hat, und warnt deutlich vor wahrscheinlich gefälschten Absendern; für solche Mails gilt „Externe Inhalte für diesen Absender immer erlauben“ nicht (#45)
 
 ## 0.2.1 – 2026-10-19
 
