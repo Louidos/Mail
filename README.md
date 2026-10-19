@@ -15,7 +15,7 @@ Grundsätze:
 Version: **0.0.0** (in Entwicklung, noch keine veröffentlichte Version)
 
 - [x] Grundgerüst (Tauri 2, leeres Fenster)
-- [ ] Konto mit eigenem Mailserver einrichten
+- [x] Konto mit eigenem Mailserver einrichten
 - [ ] Mails empfangen (IMAP, IDLE)
 - [ ] Mails sicher anzeigen
 - [ ] Verschlüsselter lokaler Speicher
@@ -27,7 +27,7 @@ Version: **0.0.0** (in Entwicklung, noch keine veröffentlichte Version)
 
 Voraussetzungen:
 
-- [Rust](https://www.rust-lang.org/tools/install) (stabil, mindestens 1.80)
+- [Rust](https://www.rust-lang.org/tools/install) (stabil, mindestens 1.90)
 - [Node.js](https://nodejs.org/) 22 mit npm
 - Systembibliotheken für Tauri 2, siehe <https://v2.tauri.app/start/prerequisites/>.
   Unter Debian/Ubuntu:
@@ -59,6 +59,16 @@ cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
 ```
+
+Integrationstests gegen den lokalen Test-Mailserver (GreenMail, braucht Docker):
+
+```sh
+scripts/test-mailserver.sh start
+cd src-tauri && cargo test -- --include-ignored
+cd .. && scripts/test-mailserver.sh stop
+```
+
+Getestet wird nie gegen echte Postfächer.
 
 ## Aufbau
 

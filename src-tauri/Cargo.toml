@@ -5,7 +5,7 @@ description = "SicherMail – sicherer Open-Source-Mailclient für den Desktop"
 authors = ["SicherMail-Mitwirkende"]
 license = "GPL-3.0-or-later"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.90"
 
 [lib]
 # Eigener Name, damit es unter Windows keinen Namenskonflikt mit dem Programm gibt.
@@ -19,6 +19,19 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+webpki-roots = "1"
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+roxmltree = "0.21"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1"] }
+zeroize = { version = "1", features = ["serde"] }
 
 [profile.release]
 codegen-units = 1
@@ -26,3 +39,17 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[dev-dependencies]
+base64 = "0.22"
+rcgen = "0.14"
+tempfile = "3"
+
+# Integrationstests liegen im gemeinsamen Ordner tests/ des Repos.
+[[test]]
+name = "konto"
+path = "../tests/integration/konto.rs"
+
+[[test]]
+name = "starttls"
+path = "../tests/integration/starttls.rs"
