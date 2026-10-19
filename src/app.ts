@@ -5,7 +5,8 @@ import { bestaetigen } from "./dialoge";
 import { el } from "./dom";
 import { kontoDialogOeffnen } from "./konto/dialog";
 import { datumKurz, ordnerKurzname, ordnerTiefe } from "./postfach/format";
-import { leseansicht } from "./postfach/lesen";
+import { leseansicht, type Inhalt } from "./postfach/lesen";
+import { linkPruefen, type LinkKlick } from "./postfach/sicher";
 
 /** So viele Mails werden pro Seite geladen. */
 export const SEITENGROESSE = 50;
@@ -27,6 +28,12 @@ interface Zustand {
   offline: string | null;
   laedt: boolean;
   offen: MailKopf | null;
+  /** Inhalt der geöffneten Mail. */
+  inhalt: Inhalt | null;
+  /** „Nur Text anzeigen“ */
+  nurText: boolean;
+  /** Kurze Rückmeldung in der Leseansicht. */
+  hinweis: string | null;
   fehler: string | null;
 }
 
@@ -42,8 +49,14 @@ export class App {
     offline: null,
     laedt: false,
     offen: null,
+    inhalt: null,
+    nurText: false,
+    hinweis: null,
     fehler: null,
   };
+
+  /** Merkt sich, was in der Leseansicht gezeichnet ist, um unnötiges Neuzeichnen zu vermeiden. */
+  private gezeichnet: unknown[] = [];
 
   private readonly kontenBereich = el("nav", { class: "konten", "aria-label": "Konten und Ordner" });
   private readonly listenBereich = el("section", { class: "mailliste", "aria-label": "Mails" });
@@ -137,6 +150,7 @@ export class App {
     this.zustand.auswahl = auswahl;
     this.zustand.mails = [];
     this.zustand.offen = null;
+    this.zustand.inhalt = null;
     this.zustand.offline = null;
     this.zeichnen();
     await this.mailsLaden(false);
@@ -171,10 +185,72 @@ export class App {
 
   private async mailOeffnen(mail: MailKopf): Promise<void> {
     this.zustand.offen = mail;
-    this.zeichnen();
+    this.zustand.hinweis = null;
+    const laden = this.inhaltLaden(false);
     if (!mail.gelesen) {
       await this.gelesenSetzen(mail, true);
     }
+    await laden;
+  }
+
+  /** Lädt den bereinigten Inhalt der geöffneten Mail (optional mit externen Inhalten). */
+  private async inhaltLaden(externLaden: boolean): Promise<void> {
+    const { auswahl, offen } = this.zustand;
+    if (!auswahl || !offen) return;
+    this.zustand.inhalt = { art: "laedt" };
+    this.zeichnen();
+    let inhalt: Inhalt;
+    try {
+      inhalt = { art: "fertig", mail: await api.mailAnzeigen(auswahl.konto, auswahl.ordner, offen.uid, externLaden) };
+    } catch (fehler) {
+      inhalt = { art: "fehler", meldung: fehlertext(fehler) };
+    }
+    // Inzwischen eine andere Mail geöffnet? Dann verwerfen.
+    if (this.zustand.offen?.uid !== offen.uid || this.zustand.auswahl !== auswahl) return;
+    this.zustand.inhalt = inhalt;
+    this.zeichnen();
+  }
+
+  /** Klick auf einen Link in einer Mail: prüfen, bei Täuschung warnen, dann im Browser öffnen. */
+  async linkKlick(klick: LinkKlick): Promise<void> {
+    const warnung = linkPruefen(klick.text, klick.href);
+    if (warnung) {
+      const ok = await bestaetigen({
+        titel: "Achtung: verdächtiger Link",
+        text: `${warnung}\n\nEchtes Ziel:\n${klick.href}`,
+        ja: "Trotzdem öffnen",
+        nein: "Nicht öffnen",
+        warnung: true,
+      });
+      if (!ok) return;
+    }
+    try {
+      await api.linkOeffnen(klick.href);
+    } catch (fehler) {
+      this.zustand.hinweis = fehlertext(fehler);
+      this.zeichnen();
+    }
+  }
+
+  private async anhangSpeichern(index: number): Promise<void> {
+    const { auswahl, offen } = this.zustand;
+    if (!auswahl || !offen) return;
+    try {
+      const name = await api.anhangSpeichern(auswahl.konto, auswahl.ordner, offen.uid, index);
+      this.zustand.hinweis = name ? `Gespeichert: ${name}` : null;
+    } catch (fehler) {
+      this.zustand.hinweis = fehlertext(fehler);
+    }
+    this.zeichnen();
+  }
+
+  private async absenderErlauben(adresse: string): Promise<void> {
+    try {
+      await api.absenderExternErlauben(adresse);
+    } catch (fehler) {
+      this.zustand.hinweis = fehlertext(fehler);
+    }
+    await this.inhaltLaden(true);
   }
 
   private async gelesenSetzen(mail: MailKopf, gelesen: boolean): Promise<void> {
@@ -195,7 +271,10 @@ export class App {
     try {
       await aktion();
       this.zustand.mails = this.zustand.mails.filter((m) => m.uid !== mail.uid);
-      if (this.zustand.offen?.uid === mail.uid) this.zustand.offen = null;
+      if (this.zustand.offen?.uid === mail.uid) {
+        this.zustand.offen = null;
+        this.zustand.inhalt = null;
+      }
       this.zustand.fehler = null;
     } catch (fehler) {
       this.zustand.fehler = fehlertext(fehler);
@@ -327,18 +406,32 @@ export class App {
   }
 
   private leseansichtZeichnen(): void {
-    const { offen, auswahl } = this.zustand;
+    const { offen, auswahl, inhalt, nurText, hinweis } = this.zustand;
+    const ordner = auswahl ? this.zustand.ordner.get(auswahl.konto) : undefined;
+    // Nur neu zeichnen, wenn sich etwas Sichtbares geändert hat (sonst würde das iframe neu geladen).
+    const stand = [offen?.uid, offen?.gelesen, auswahl, inhalt, nurText, hinweis, ordner];
+    if (stand.length === this.gezeichnet.length && stand.every((wert, i) => wert === this.gezeichnet[i])) {
+      return;
+    }
+    this.gezeichnet = stand;
     if (!offen || !auswahl) {
       this.leseBereich.replaceChildren(el("p", { class: "leise" }, "Keine Mail ausgewählt."));
       return;
     }
-    const ordner = this.zustand.ordner.get(auswahl.konto) ?? [];
     this.leseBereich.replaceChildren(
-      leseansicht(offen, auswahl.ordner, ordner, {
+      leseansicht(offen, auswahl.ordner, ordner ?? [], inhalt ?? { art: "laedt" }, { nurText, hinweis }, {
         gelesenUmschalten: (mail) => void this.gelesenSetzen(mail, !mail.gelesen),
         loeschen: (mail) => void this.mailLoeschen(mail),
         verschieben: (mail, ziel) =>
           void this.mailEntfernen(mail, () => api.mailVerschieben(auswahl.konto, auswahl.ordner, mail.uid, ziel)),
+        nurTextUmschalten: (wert) => {
+          this.zustand.nurText = wert;
+          this.zeichnen();
+        },
+        externLaden: () => void this.inhaltLaden(true),
+        absenderErlauben: (adresse) => void this.absenderErlauben(adresse),
+        anhangSpeichern: (index) => void this.anhangSpeichern(index),
+        linkKlick: (klick) => void this.linkKlick(klick),
       }),
     );
   }

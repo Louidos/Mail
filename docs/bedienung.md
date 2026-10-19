@@ -78,6 +78,24 @@ Eine Mail anklicken öffnet sie rechts und markiert sie als gelesen. Darüber:
 Alle Änderungen werden sofort zum Server übertragen und gelten damit auch für andere Programme.
 SicherMail löscht nie von sich aus Mails auf dem Server.
 
+## Mails sicher lesen
+
+SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keinen Schaden anrichten:
+
+- **Skripte, Formulare und eingebettete Fenster** werden vor der Anzeige entfernt. HTML-Mails werden in
+  einem abgeschotteten Bereich angezeigt, in dem nichts ausgeführt und nichts aus dem Internet geladen wird.
+- **Externe Inhalte** (z. B. Bilder von Webseiten, oft unsichtbare „Tracking-Pixel“) sind blockiert.
+  Eine Leiste zeigt, wie viele blockiert wurden:
+  - **Externe Inhalte laden** lädt sie für diese eine Mail – nur über verschlüsseltes HTTPS.
+  - **Für … immer erlauben** lädt sie bei diesem Absender künftig automatisch.
+- **Links** öffnen sich erst nach einem Klick im Standardbrowser. Beim Überfahren mit der Maus siehst du das
+  echte Ziel. Zeigt der Linktext eine andere Adresse als das echte Ziel (typisch für Phishing), warnt
+  SicherMail und öffnet den Link nur, wenn du **Trotzdem öffnen** wählst. Geöffnet werden nur
+  `https:`, `http:` und `mailto:`.
+- **Anhänge** werden nur aufgelistet und nie automatisch geöffnet. Mit **Speichern unter …** legst du sie
+  ab. Prüfe Dateien, bevor du sie öffnest.
+- **Nur Text anzeigen** zeigt statt der HTML-Fassung den reinen Text der Mail.
+
 ## Wo liegen meine Daten?
 
 - Kontoeinstellungen ohne Passwort: `konten.json` im App-Datenordner

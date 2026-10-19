@@ -17,7 +17,7 @@ Version: **0.0.0** (in Entwicklung, noch keine veröffentlichte Version)
 - [x] Grundgerüst (Tauri 2, leeres Fenster)
 - [x] Konto mit eigenem Mailserver einrichten
 - [x] Mails empfangen (IMAP, IDLE)
-- [ ] Mails sicher anzeigen
+- [x] Mails sicher anzeigen
 - [ ] Verschlüsselter lokaler Speicher
 - [ ] Mails senden (SMTP)
 

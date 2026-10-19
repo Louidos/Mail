@@ -5,8 +5,12 @@
 
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
+use crate::anzeige::{self, extern_inhalte, AufbereiteteMail};
+use crate::einstellungen::EinstellungsSpeicher;
 use crate::fehler::Fehlermeldung;
 use crate::imap::beobachter::{Beobachter, Melder};
 use crate::imap::dienst::{ImapDienst, MailSeite};
@@ -23,6 +27,7 @@ pub struct AppZustand {
     pub imap: Arc<ImapDienst>,
     pub beobachter: Arc<Beobachter>,
     pub melder: Melder,
+    pub einstellungen: Arc<EinstellungsSpeicher>,
 }
 
 #[tauri::command]
@@ -123,4 +128,122 @@ pub async fn mail_verschieben(
     ziel: String,
 ) -> Result<(), Fehlermeldung> {
     zustand.imap.verschieben(&konto, &ordner, uid, &ziel).await
+}
+
+/// Bereitet eine Mail sicher zur Anzeige auf.
+///
+/// Externe Inhalte werden nur geladen, wenn der Nutzer es für diese Mail verlangt
+/// (`extern_laden`) oder für den Absender dauerhaft erlaubt hat.
+#[tauri::command]
+pub async fn mail_anzeigen(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: String,
+    uid: u32,
+    extern_laden: bool,
+) -> Result<AufbereiteteMail, Fehlermeldung> {
+    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let mail = anzeige::aufbereiten(&roh, None)?;
+    if mail.extern_blockiert == 0 {
+        return Ok(mail);
+    }
+    let absender = mail
+        .von
+        .first()
+        .map(|a| a.adresse.clone())
+        .unwrap_or_default();
+    if !extern_laden && !zustand.einstellungen.extern_erlaubt(&absender).await {
+        return Ok(mail);
+    }
+    let adressen = anzeige::externe_adressen(&roh)?;
+    let geladen = extern_inhalte::bilder_laden(&adressen).await;
+    anzeige::aufbereiten(&roh, Some(&geladen))
+}
+
+/// Erlaubt externe Inhalte für einen Absender dauerhaft.
+#[tauri::command]
+pub async fn absender_extern_erlauben(
+    zustand: State<'_, AppZustand>,
+    adresse: String,
+) -> Result<(), Fehlermeldung> {
+    zustand.einstellungen.extern_erlauben(&adresse).await
+}
+
+/// Speichert einen Anhang über den Dialog „Speichern unter“. Gibt den Dateinamen
+/// zurück oder `None`, wenn abgebrochen wurde. Anhänge werden nie geöffnet.
+#[tauri::command]
+pub async fn anhang_speichern(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: String,
+    uid: u32,
+    index: usize,
+) -> Result<Option<String>, Fehlermeldung> {
+    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let (name, daten) = anzeige::anhang_inhalt(&roh, index)?;
+    let (sender, empfaenger) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Anhang speichern unter …")
+        .set_file_name(&name)
+        .save_file(move |pfad| {
+            let _ = sender.send(pfad);
+        });
+    let Some(pfad) = empfaenger.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let pfad = pfad
+        .into_path()
+        .map_err(|_| Fehlermeldung::neu("datei", "Ungültiger Speicherort."))?;
+    tokio::fs::write(&pfad, &daten)
+        .await
+        .map_err(|_| Fehlermeldung::neu("datei", "Der Anhang konnte nicht gespeichert werden."))?;
+    Ok(Some(
+        pfad.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or(name),
+    ))
+}
+
+/// Prüft, ob eine Adresse im Standardbrowser bzw. Mailprogramm geöffnet werden darf.
+pub fn link_erlaubt(url: &str) -> bool {
+    let klein = url.to_ascii_lowercase();
+    url.len() <= 8192
+        && !url.chars().any(|c| c.is_control() || c.is_whitespace())
+        && (klein.starts_with("https://")
+            || klein.starts_with("http://")
+            || klein.starts_with("mailto:"))
+}
+
+/// Öffnet einen Link im Standardbrowser (nur http, https und mailto).
+#[tauri::command]
+pub async fn link_oeffnen(app: AppHandle, url: String) -> Result<(), Fehlermeldung> {
+    if !link_erlaubt(&url) {
+        return Err(Fehlermeldung::neu(
+            "eingabe",
+            "Dieser Link wird aus Sicherheitsgründen nicht geöffnet.",
+        ));
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| Fehlermeldung::neu("link", "Der Link konnte nicht geöffnet werden."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nur_sichere_links_werden_geoeffnet() {
+        assert!(link_erlaubt("https://example.org/pfad?x=1"));
+        assert!(link_erlaubt("http://example.org"));
+        assert!(link_erlaubt("mailto:anna@example.org"));
+        assert!(!link_erlaubt("javascript:alert(1)"));
+        assert!(!link_erlaubt("file:///etc/passwd"));
+        assert!(!link_erlaubt("data:text/html,<script>"));
+        assert!(!link_erlaubt("smb://server/freigabe"));
+        assert!(!link_erlaubt("https://example.org/\nboese"));
+        assert!(!link_erlaubt("https://example.org/ leer"));
+    }
 }

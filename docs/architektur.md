@@ -64,3 +64,24 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   Nutzers: Verschieben in den Papierkorb (`UID MOVE`, sonst `UID COPY` + `\Deleted`), endgültig nur die
   eine Mail per `UID EXPUNGE` (UIDPLUS). Ohne UIDPLUS bleibt sie als gelöscht markiert und wird ausgeblendet.
 - **Zwischenspeicher** über die Schnittstelle `MailCache`; derzeit im Arbeitsspeicher (`SpeicherCache`).
+
+## Mails anzeigen (`anzeige`)
+
+- **MIME** mit `mail-parser`: Betreff, Adressen, Datum, Message-ID und References, Text- und HTML-Teil,
+  eingebettete Bilder (`cid:`) und Anhänge.
+- **HTML-Bereinigung** mit `ammonia` im Backend: nur eine Liste harmloser Tags und Attribute; entfernt werden
+  u. a. `script`, `style`, `iframe`, `object`, `form`, `input`, `svg`, alle Event-Attribute, Kommentare,
+  CSS mit `url()`/`expression()`/`@import` und Links ausser `http`, `https`, `mailto`.
+  Bilder: nur `data:` (PNG, JPEG, GIF, WebP) und eingebettete `cid:`-Bilder; externe Bilder werden entfernt
+  und gezählt.
+- **Externe Inhalte** lädt auf Wunsch das Backend (`extern_inhalte`): nur HTTPS, nur Bilder, höchstens
+  5 MB je Bild und 40 Bilder, ohne Cookies und Referer; eingesetzt als `data:`-Adressen.
+  Erlaubte Absender stehen in `einstellungen.json`.
+- **Anzeige** im Frontend (`src/postfach/sicher.ts`): `iframe` mit `sandbox="allow-same-origin"` (also ohne
+  `allow-scripts`, Formulare, Popups und Navigation des Hauptfensters) und eigener CSP
+  `default-src 'none'; img-src data:; style-src 'unsafe-inline'`. Links im iframe werden vom Hauptfenster
+  auf `about:blank#sichermail-link-<n>` umgeschrieben; ein Klick lädt nur ein leeres Dokument im iframe,
+  das Hauptfenster erkennt die Marke, stellt den Inhalt wieder her, prüft den Link (`linkPruefen`) und
+  öffnet ihn über den Backend-Befehl `link_oeffnen` im Standardbrowser.
+- **Anhänge** speichert der Backend-Befehl `anhang_speichern` über den Dialog „Speichern unter“ (Dateiname
+  gesäubert). Das Frontend hat weder Dialog- noch Dateisystemrechte.
