@@ -29,7 +29,6 @@ pub struct MailKopf {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OrdnerStand {
     pub uidvalidity: u32,
-    pub uidnext: u32,
 }
 
 /// Ablage für Mails eines oder mehrerer Konten.
@@ -314,10 +313,7 @@ pub(crate) mod tests {
 
     /// Prüft das Verhalten, das jede Ablage erfüllen muss.
     pub(crate) fn verhalten_pruefen(cache: &dyn MailCache) {
-        let stand = OrdnerStand {
-            uidvalidity: 7,
-            uidnext: 4,
-        };
+        let stand = OrdnerStand { uidvalidity: 7 };
         cache.stand_setzen("k", "INBOX", stand).unwrap();
         cache
             .koepfe_speichern("k", "INBOX", &[kopf(1), kopf(2), kopf(3)])
@@ -349,26 +345,12 @@ pub(crate) mod tests {
 
         // Gleiche UIDVALIDITY: Inhalt bleibt.
         cache
-            .stand_setzen(
-                "k",
-                "INBOX",
-                OrdnerStand {
-                    uidvalidity: 7,
-                    uidnext: 10,
-                },
-            )
+            .stand_setzen("k", "INBOX", OrdnerStand { uidvalidity: 7 })
             .unwrap();
         assert_eq!(cache.uids("k", "INBOX").unwrap(), vec![1, 2]);
         // Neue UIDVALIDITY: Ordner wird geleert.
         cache
-            .stand_setzen(
-                "k",
-                "INBOX",
-                OrdnerStand {
-                    uidvalidity: 8,
-                    uidnext: 1,
-                },
-            )
+            .stand_setzen("k", "INBOX", OrdnerStand { uidvalidity: 8 })
             .unwrap();
         assert!(cache.uids("k", "INBOX").unwrap().is_empty());
 

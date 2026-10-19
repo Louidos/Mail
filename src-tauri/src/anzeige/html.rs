@@ -65,7 +65,7 @@ fn ist_erlaubtes_datenbild(wert: &str) -> bool {
 
 fn ist_extern(wert: &str) -> bool {
     let klein = wert.trim_start().to_ascii_lowercase();
-    klein.starts_with("https:") || klein.starts_with("http:") || klein.starts_with("//")
+    klein.starts_with("https:") || klein.starts_with("http:")
 }
 
 fn ist_erlaubter_link(wert: &str) -> bool {
@@ -148,7 +148,7 @@ pub fn bereinigen(
         ("ol", &["start", "type"][..]),
         ("ul", &["type"][..]),
         ("li", &["value", "type"][..]),
-        ("blockquote", &["cite", "type"][..]),
+        ("blockquote", &["type"][..]),
     ] {
         tag_attribute
             .entry(tag)
@@ -166,7 +166,7 @@ pub fn bereinigen(
         .link_rel(Some("noopener noreferrer"))
         .strip_comments(true)
         .attribute_filter(move |element, attribut, wert| match (element, attribut) {
-            ("a" | "area", "href") => ist_erlaubter_link(wert).then(|| wert.into()),
+            ("a", "href") => ist_erlaubter_link(wert).then(|| wert.into()),
             ("img", "src") => {
                 let wert_klein = wert.trim().to_ascii_lowercase();
                 if let Some(cid) = wert_klein.strip_prefix("cid:") {
@@ -352,6 +352,32 @@ mod tests {
         for n in 0..6 {
             assert!(ergebnis.html.contains(&bild(n)), "Bild {n} fehlt");
         }
+    }
+
+    #[test]
+    fn protokollrelative_bilder_werden_weder_geladen_noch_gezaehlt() {
+        // ammonia verwirft relative Adressen (auch `//…`) vor dem Attributfilter.
+        let html = r#"<p>Text</p><img src="//tracker.example/pixel.gif" alt="x">"#;
+        let geladen = HashMap::from([(
+            "//tracker.example/pixel.gif".to_string(),
+            "data:image/gif;base64,R0lGODlh".to_string(),
+        )]);
+        for extern_geladen in [None, Some(&geladen)] {
+            let ergebnis = bereinigen(html, &HashMap::new(), extern_geladen);
+            assert!(!ergebnis.html.contains("tracker.example"));
+            assert!(!ergebnis.html.contains("data:image/gif"));
+            assert!(ergebnis.blockiert.is_empty());
+        }
+    }
+
+    #[test]
+    fn zitate_behalten_ihre_form_ohne_quelle() {
+        let html = r#"<blockquote type="cite" cite="https://tracker.example/q">Zitat</blockquote>"#;
+        let ergebnis = bereinigen(html, &HashMap::new(), None);
+        assert!(ergebnis
+            .html
+            .contains(r#"<blockquote type="cite">Zitat</blockquote>"#));
+        assert!(!ergebnis.html.contains("tracker.example"));
     }
 
     #[test]

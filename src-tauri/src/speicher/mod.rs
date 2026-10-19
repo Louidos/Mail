@@ -184,10 +184,6 @@ impl SqlCache {
         Self::dateien_entfernen(&pfad);
     }
 
-    pub fn pfad(&self) -> &Path {
-        &self.pfad
-    }
-
     fn mit<T>(
         &self,
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
@@ -220,12 +216,11 @@ impl MailCache for SqlCache {
     fn stand(&self, konto: &str, ordner: &str) -> Result<Option<OrdnerStand>, Fehlermeldung> {
         self.mit(|v| {
             v.query_row(
-                "SELECT uidvalidity, uidnext FROM ordner_stand WHERE konto = ?1 AND ordner = ?2",
+                "SELECT uidvalidity FROM ordner_stand WHERE konto = ?1 AND ordner = ?2",
                 params![konto, ordner],
                 |z| {
                     Ok(OrdnerStand {
                         uidvalidity: z.get(0)?,
-                        uidnext: z.get(1)?,
                     })
                 },
             )
@@ -253,10 +248,12 @@ impl MailCache for SqlCache {
                     params![konto, ordner],
                 )?;
             }
+            // Die Spalte `uidnext` wird nicht mehr gelesen; sie bleibt, damit das Datenformat
+            // unverändert ist, und wird bei neuen Zeilen nur mit 0 gefüllt.
             v.execute(
-                "INSERT INTO ordner_stand (konto, ordner, uidvalidity, uidnext) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT (konto, ordner) DO UPDATE SET uidvalidity = ?3, uidnext = ?4",
-                params![konto, ordner, stand.uidvalidity, stand.uidnext],
+                "INSERT INTO ordner_stand (konto, ordner, uidvalidity, uidnext) VALUES (?1, ?2, ?3, 0)
+                 ON CONFLICT (konto, ordner) DO UPDATE SET uidvalidity = ?3",
+                params![konto, ordner, stand.uidvalidity],
             )?;
             Ok(())
         })
@@ -489,6 +486,39 @@ mod tests {
         let ordner = tempfile::tempdir().unwrap();
         let cache = SqlCache::oeffnen(&ordner.path().join(DATEINAME), &schluessel(7)).unwrap();
         verhalten_pruefen(&cache);
+    }
+
+    #[test]
+    fn bestehende_datenbank_mit_uidnext_bleibt_lesbar() {
+        let ordner = tempfile::tempdir().unwrap();
+        let pfad = ordner.path().join(DATEINAME);
+        {
+            // So hat eine frühere Version den Stand geschrieben (mit echtem UIDNEXT).
+            let cache = SqlCache::oeffnen(&pfad, &schluessel(3)).unwrap();
+            cache
+                .mit(|v| {
+                    v.execute(
+                        "INSERT INTO ordner_stand (konto, ordner, uidvalidity, uidnext)
+                         VALUES ('k', 'INBOX', 7, 42)",
+                        [],
+                    )
+                })
+                .unwrap();
+            cache.koepfe_speichern("k", "INBOX", &[kopf(1)]).unwrap();
+        }
+        let cache = SqlCache::oeffnen(&pfad, &schluessel(3)).unwrap();
+        assert_eq!(
+            cache.stand("k", "INBOX").unwrap(),
+            Some(OrdnerStand { uidvalidity: 7 })
+        );
+        cache
+            .stand_setzen("k", "INBOX", OrdnerStand { uidvalidity: 7 })
+            .unwrap();
+        assert_eq!(cache.uids("k", "INBOX").unwrap(), vec![1]);
+        let uidnext: u32 = cache
+            .mit(|v| v.query_row("SELECT uidnext FROM ordner_stand", [], |z| z.get(0)))
+            .unwrap();
+        assert_eq!(uidnext, 42, "vorhandener Wert bleibt unangetastet");
     }
 
     #[test]
