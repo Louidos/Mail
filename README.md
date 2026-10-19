@@ -13,7 +13,7 @@ Grundsätze:
 
 ## Projektstand
 
-Version: **0.3.0** (siehe [Releases](https://github.com/Louidos/Mail/releases))
+Version: **0.4.0** (siehe [Releases](https://github.com/Louidos/Mail/releases))
 
 - [x] Grundgerüst (Tauri 2, leeres Fenster)
 - [x] Konto mit eigenem Mailserver einrichten
