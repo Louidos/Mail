@@ -74,3 +74,7 @@ path = "../tests/integration/anzeige.rs"
 [[test]]
 name = "speicher"
 path = "../tests/integration/speicher.rs"
+
+[[test]]
+name = "senden"
+path = "../tests/integration/senden.rs"

@@ -52,6 +52,14 @@ pub struct Konto {
     pub benutzername: String,
     pub imap: ServerEinstellung,
     pub smtp: ServerEinstellung,
+    /// Gesendete Mails per IMAP im Ordner „Gesendet“ ablegen. Ausschalten, wenn der
+    /// Server das selbst tut (sonst liegen sie doppelt dort).
+    #[serde(default = "standard_an")]
+    pub gesendet_ablegen: bool,
+}
+
+fn standard_an() -> bool {
+    true
 }
 
 /// Eingabe aus dem Einrichtungsdialog.
@@ -68,6 +76,8 @@ pub struct KontoEingabe {
     pub passwort: Option<Zeroizing<String>>,
     pub imap: ServerEinstellung,
     pub smtp: ServerEinstellung,
+    #[serde(default = "standard_an")]
+    pub gesendet_ablegen: bool,
 }
 
 // Eigene Debug-Ausgabe, damit das Passwort nie in Logs oder Fehlermeldungen landet.
@@ -81,6 +91,7 @@ impl fmt::Debug for KontoEingabe {
             .field("passwort", &self.passwort.as_ref().map(|_| "***"))
             .field("imap", &self.imap)
             .field("smtp", &self.smtp)
+            .field("gesendet_ablegen", &self.gesendet_ablegen)
             .finish()
     }
 }
@@ -95,7 +106,10 @@ impl KontoEingabe {
         let email = self.email.trim();
         match email.split_once('@') {
             Some((lokal, domain))
-                if !lokal.is_empty() && domain.contains('.') && !email.contains(' ') => {}
+                if !lokal.is_empty()
+                    && domain.contains('.')
+                    && !domain.contains('@')
+                    && !email.contains(char::is_whitespace) => {}
             _ => return fehler("Bitte eine gültige E-Mail-Adresse angeben."),
         }
         if self.benutzername.trim().is_empty() {
@@ -141,6 +155,7 @@ impl KontoEingabe {
             benutzername: self.benutzername.trim().to_string(),
             imap: saeubern(&self.imap),
             smtp: saeubern(&self.smtp),
+            gesendet_ablegen: self.gesendet_ablegen,
         }
     }
 }
@@ -293,6 +308,7 @@ mod tests {
                 verschluesselung: Verschluesselung::Starttls,
                 zertifikat: None,
             },
+            gesendet_ablegen: true,
         }
     }
 
@@ -312,6 +328,10 @@ mod tests {
     fn ungueltige_eingaben_werden_abgelehnt() {
         let mut e = beispiel_eingabe();
         e.email = "keine-adresse".into();
+        assert!(e.pruefen().is_err());
+
+        let mut e = beispiel_eingabe();
+        e.email = "a@b@example.org".into();
         assert!(e.pruefen().is_err());
 
         let mut e = beispiel_eingabe();

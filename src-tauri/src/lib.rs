@@ -55,6 +55,7 @@ pub fn run() {
             let imap = Arc::new(ImapDienst::neu(konten.clone(), cache));
             imap.vorladen_setzen(lokal_speichern && speicher_hinweis.is_none());
             let beobachter = Arc::new(Beobachter::default());
+            let senden = Arc::new(smtp::dienst::SendeDienst::neu(konten.clone(), imap.clone()));
             let griff = app.handle().clone();
             let melder: Melder = Arc::new(move |ereignis| {
                 let _ = griff.emit(MAIL_EREIGNIS, ereignis);
@@ -79,6 +80,7 @@ pub fn run() {
                 beobachter,
                 melder,
                 einstellungen,
+                senden,
                 schluesselbund,
                 datenordner: ordner,
                 speicher_hinweis: std::sync::Mutex::new(speicher_hinweis),
@@ -105,6 +107,12 @@ pub fn run() {
             befehle::lokal_speichern_setzen,
             befehle::lokalen_speicher_leeren,
             befehle::absender_extern_entfernen,
+            befehle::anhang_waehlen,
+            befehle::mail_anhaenge_uebernehmen,
+            befehle::mail_senden,
+            befehle::entwurf_speichern,
+            befehle::entwuerfe_auflisten,
+            befehle::entwurf_loeschen,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");

@@ -51,11 +51,15 @@ pub fn eingabe(benutzer: &str, passwort: &str) -> KontoEingabe {
     KontoEingabe {
         id: None,
         name: "Test Nutzer".into(),
-        email: format!("{benutzer}@localhost.test"),
+        email: format!(
+            "{}@localhost.test",
+            benutzer.split('@').next().unwrap_or(benutzer)
+        ),
         benutzername: benutzer.into(),
         passwort: Some(Zeroizing::new(passwort.into())),
         imap: server(IMAP_TLS, Verschluesselung::Tls, true),
         smtp: server(SMTP_TLS, Verschluesselung::Tls, true),
+        gesendet_ablegen: true,
     }
 }
 
@@ -113,6 +117,19 @@ pub async fn konto_mit_imap_port(
     std::sync::Arc<sichermail_lib::konto::KontoVerwaltung>,
     sichermail_lib::konto::Konto,
 ) {
+    konto_mit_ports(adresse, imap_port, SMTP_TLS).await
+}
+
+/// Wie [`konto_mit_imap_port`], zusätzlich mit eigenem SMTP-Port.
+pub async fn konto_mit_ports(
+    adresse: &str,
+    imap_port: u16,
+    smtp_port: u16,
+) -> (
+    tempfile::TempDir,
+    std::sync::Arc<sichermail_lib::konto::KontoVerwaltung>,
+    sichermail_lib::konto::Konto,
+) {
     let ordner = tempfile::tempdir().unwrap();
     let verwaltung = std::sync::Arc::new(sichermail_lib::konto::KontoVerwaltung::neu(
         ordner.path(),
@@ -122,6 +139,7 @@ pub async fn konto_mit_imap_port(
     ));
     let mut e = eingabe(adresse, adresse);
     e.imap.port = imap_port;
+    e.smtp.port = smtp_port;
     let konto = verwaltung.speichern(&e).await.expect("Konto anlegen");
     (ordner, verwaltung, konto)
 }

@@ -72,6 +72,7 @@ mod tests {
             benutzername: "test".into(),
             imap: server.clone(),
             smtp: server,
+            gesendet_ablegen: true,
         }
     }
 
@@ -98,6 +99,21 @@ mod tests {
             let rechte = fs::metadata(&pfad).unwrap().permissions().mode() & 0o777;
             assert_eq!(rechte, 0o600);
         }
+    }
+
+    #[test]
+    fn aeltere_datei_ohne_neue_felder_wird_gelesen() {
+        let ordner = tempfile::tempdir().unwrap();
+        let pfad = ordner.path().join("konten.json");
+        fs::write(
+            &pfad,
+            r#"{"version":1,"konten":[{"id":"a","name":"A","email":"a@example.org","benutzername":"a",
+            "imap":{"host":"i.example.org","port":993,"verschluesselung":"tls"},
+            "smtp":{"host":"s.example.org","port":465,"verschluesselung":"tls"}}]}"#,
+        )
+        .unwrap();
+        let konten = laden(&pfad).unwrap();
+        assert!(konten[0].gesendet_ablegen);
     }
 
     #[test]

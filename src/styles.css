@@ -200,6 +200,7 @@ nav.konten {
 
 .konto-knoepfe {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   margin-top: 0.4rem;
 }
@@ -530,4 +531,49 @@ ul.absender-liste li {
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
+}
+
+.meldung {
+  background: var(--flaeche-2);
+  padding: 0.35rem 1rem;
+  font-size: 0.9rem;
+}
+
+dialog.verfassen-dialog {
+  max-width: min(820px, 96vw);
+}
+
+dialog.verfassen-dialog textarea[name="text"] {
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+ul.entwurf-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+ul.entwurf-liste li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1rem 0.75rem;
+  border-bottom: 1px solid var(--rand);
+  padding-bottom: 0.4rem;
+}
+
+.entwurf-betreff {
+  font-weight: 600;
+}
+
+.knoepfe-inline {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
 }

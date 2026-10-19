@@ -82,10 +82,16 @@ pub trait MailCache: Send + Sync {
         uid: u32,
         inhalt: &[u8],
     ) -> Result<(), Fehlermeldung>;
-    /// Entfernt alles zu einem Konto.
+    /// Entfernt alles zu einem Konto (auch Entwürfe).
     fn konto_entfernen(&self, konto: &str) -> Result<(), Fehlermeldung>;
-    /// Entfernt alles.
+    /// Entfernt alle zwischengespeicherten Mails. Entwürfe bleiben erhalten.
     fn leeren(&self) -> Result<(), Fehlermeldung>;
+
+    /// Speichert (oder ersetzt) einen Entwurf als JSON.
+    fn entwurf_speichern(&self, id: &str, konto: &str, daten: &str) -> Result<(), Fehlermeldung>;
+    /// Alle Entwürfe eines Kontos als (ID, JSON), zuletzt geänderte zuerst.
+    fn entwuerfe(&self, konto: &str) -> Result<Vec<(String, String)>, Fehlermeldung>;
+    fn entwurf_loeschen(&self, id: &str) -> Result<(), Fehlermeldung>;
 }
 
 #[derive(Default)]
@@ -99,6 +105,9 @@ struct OrdnerDaten {
 #[derive(Default)]
 pub struct SpeicherCache {
     daten: Mutex<HashMap<(String, String), OrdnerDaten>>,
+    /// Entwürfe: ID → (Konto, JSON, laufende Nummer für die Reihenfolge)
+    entwuerfe: Mutex<HashMap<String, (String, String, u64)>>,
+    zaehler: std::sync::atomic::AtomicU64,
 }
 
 impl SpeicherCache {
@@ -231,6 +240,9 @@ impl MailCache for SpeicherCache {
             .lock()
             .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?;
         daten.retain(|(k, _), _| k != konto);
+        if let Ok(mut entwuerfe) = self.entwuerfe.lock() {
+            entwuerfe.retain(|_, (k, _, _)| k != konto);
+        }
         Ok(())
     }
 
@@ -240,6 +252,45 @@ impl MailCache for SpeicherCache {
             .lock()
             .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?;
         daten.clear();
+        Ok(())
+    }
+
+    fn entwurf_speichern(&self, id: &str, konto: &str, daten: &str) -> Result<(), Fehlermeldung> {
+        let nummer = self
+            .zaehler
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.entwuerfe
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?
+            .insert(
+                id.to_string(),
+                (konto.to_string(), daten.to_string(), nummer),
+            );
+        Ok(())
+    }
+
+    fn entwuerfe(&self, konto: &str) -> Result<Vec<(String, String)>, Fehlermeldung> {
+        let entwuerfe = self
+            .entwuerfe
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?;
+        let mut liste: Vec<_> = entwuerfe
+            .iter()
+            .filter(|(_, (k, _, _))| k == konto)
+            .map(|(id, (_, daten, nummer))| (*nummer, id.clone(), daten.clone()))
+            .collect();
+        liste.sort_by_key(|eintrag| std::cmp::Reverse(eintrag.0));
+        Ok(liste
+            .into_iter()
+            .map(|(_, id, daten)| (id, daten))
+            .collect())
+    }
+
+    fn entwurf_loeschen(&self, id: &str) -> Result<(), Fehlermeldung> {
+        self.entwuerfe
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?
+            .remove(id);
         Ok(())
     }
 }
@@ -330,6 +381,26 @@ pub(crate) mod tests {
         assert_eq!(cache.uids("anders", "INBOX").unwrap(), vec![5]);
         cache.leeren().unwrap();
         assert!(cache.uids("anders", "INBOX").unwrap().is_empty());
+
+        // Entwürfe: überleben „leeren“, neueste zuerst, werden mit dem Konto entfernt.
+        cache.entwurf_speichern("e1", "k", "{\"a\":1}").unwrap();
+        cache.entwurf_speichern("e2", "k", "{\"a\":2}").unwrap();
+        cache.entwurf_speichern("e3", "anders", "{}").unwrap();
+        cache.entwurf_speichern("e1", "k", "{\"a\":3}").unwrap();
+        cache.leeren().unwrap();
+        let liste = cache.entwuerfe("k").unwrap();
+        assert_eq!(
+            liste,
+            vec![
+                ("e1".to_string(), "{\"a\":3}".to_string()),
+                ("e2".to_string(), "{\"a\":2}".to_string())
+            ]
+        );
+        cache.entwurf_loeschen("e2").unwrap();
+        assert_eq!(cache.entwuerfe("k").unwrap().len(), 1);
+        cache.konto_entfernen("k").unwrap();
+        assert!(cache.entwuerfe("k").unwrap().is_empty());
+        assert_eq!(cache.entwuerfe("anders").unwrap().len(), 1);
     }
 
     #[test]

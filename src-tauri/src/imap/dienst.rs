@@ -423,6 +423,45 @@ impl ImapDienst {
         Ok(inhalte.len())
     }
 
+    /// Legt eine gesendete Mail im Ordner „Gesendet“ ab (IMAP APPEND, als gelesen markiert).
+    /// Gibt es keinen solchen Ordner, wird „Sent“ angelegt.
+    pub async fn gesendet_ablegen(
+        &self,
+        konto_id: &str,
+        inhalt: &[u8],
+    ) -> Result<(), Fehlermeldung> {
+        let ziel = match self.sonderordner(konto_id, Sonderordner::Gesendet).await? {
+            Some(ordner) => ordner,
+            None => {
+                let _ = self
+                    .ausfuehren(konto_id, |s| {
+                        Box::pin(async move {
+                            s.create("Sent").await.map_err(fehler_einordnen)?;
+                            Ok(())
+                        })
+                    })
+                    .await;
+                if let Ok(mut ordner) = self.ordner.lock() {
+                    ordner.remove(konto_id);
+                }
+                "Sent".to_string()
+            }
+        };
+        let inhalt = Arc::new(inhalt.to_vec());
+        self.ausfuehren(konto_id, move |s| {
+            let ziel = ziel.clone();
+            let inhalt = inhalt.clone();
+            Box::pin(async move {
+                s.append(&ziel, Some("(\\Seen)"), None, inhalt.as_slice())
+                    .await
+                    .map_err(fehler_einordnen)?;
+                Ok(())
+            })
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Markiert eine Mail als gelesen oder ungelesen (auch auf dem Server).
     pub async fn gelesen_setzen(
         &self,
