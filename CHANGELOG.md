@@ -13,6 +13,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 - Bei STARTTLS-Verbindungen kann eine Gegenstelle im Netz SicherMail vor dem Start der Verschlüsselung nicht mehr endlos hinhalten oder den Speicher füllen; nach spätestens 60 Sekunden wird abgebrochen (#23)
 - Die 25-MB-Grenze für Anhänge gilt jetzt auch für Dateien, die nach dem Anhängen gewachsen sind; statt abzustürzen erscheint die gewohnte Meldung (#25)
 - Ordner mit sehr hohen oder ungültigen Mailnummern (UID) werden wieder abgeglichen, statt hängen zu bleiben (#26)
+- Scheitert das Löschen eines Kontos (z. B. weil der Schlüsselbund gesperrt ist), kommen für dieses Konto weiterhin neue Mails an (#27)
 
 ## 0.1.1 – 2026-10-19
 

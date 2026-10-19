@@ -110,7 +110,15 @@ pub async fn konto_loeschen(
 ) -> Result<(), Fehlermeldung> {
     zustand.beobachter.stoppen(&id);
     zustand.imap.trennen(&id).await;
-    zustand.konten.loeschen(&id).await?;
+    if let Err(fehler) = zustand.konten.loeschen(&id).await {
+        // Das Konto besteht weiter (z. B. Schlüsselbund gesperrt): weiter auf neue Mails achten.
+        if zustand.konten.finden(&id).await.is_ok() {
+            zustand
+                .beobachter
+                .starten(&id, zustand.imap.clone(), zustand.melder.clone());
+        }
+        return Err(fehler);
+    }
     zustand.imap.cache().konto_entfernen(&id)
 }
 
