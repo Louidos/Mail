@@ -3,6 +3,7 @@
  * oder Dateizugriff; alles läuft über diese Befehle.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { Darstellung } from "./einstellungen/darstellung";
 
 export type Verschluesselung = "tls" | "starttls";
 
@@ -200,6 +201,8 @@ export interface Einstellungen {
   proxy_adresse: string;
   /** Gesetzt, wenn der verschlüsselte Speicher nicht verfügbar ist. */
   speicher_hinweis: string | null;
+  /** Hell, dunkel oder wie das System (#47). */
+  darstellung: Darstellung;
 }
 
 /** Ein gewählter Anhang (das Frontend kennt nur das Token, nie den Dateipfad). */
@@ -277,6 +280,7 @@ export const api = {
   lokalenSpeicherLeeren: () => invoke<void>("lokalen_speicher_leeren"),
   absenderExternEntfernen: (adresse: string) => invoke<void>("absender_extern_entfernen", { adresse }),
   proxySetzen: (an: boolean, adresse: string) => invoke<void>("proxy_setzen", { an, adresse }),
+  darstellungSetzen: (darstellung: Darstellung) => invoke<void>("darstellung_setzen", { darstellung }),
   anhangWaehlen: () => invoke<AnhangAuswahl[]>("anhang_waehlen"),
   mailAnhaengeUebernehmen: (konto: string, ordner: string, uid: number) =>
     invoke<AnhangAuswahl[]>("mail_anhaenge_uebernehmen", { konto, ordner, uid }),

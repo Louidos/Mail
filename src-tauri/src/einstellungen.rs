@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::Mutex;
 
 use crate::anzeige::absender::Stufe;
@@ -27,10 +27,66 @@ pub struct Einstellungen {
     /// `proxy_externe_bilder`. Wird beim Setzen geprüft.
     #[serde(default)]
     pub proxy_adresse: String,
+    /// Hell, dunkel oder wie das System (#47). Standard: wie das System.
+    #[serde(default, deserialize_with = "darstellung_nachsichtig")]
+    pub darstellung: Darstellung,
 }
 
 fn standard_an() -> bool {
     true
+}
+
+/// Setzt `data-darstellung`, sobald es das `<html>`-Element gibt (das Skript läuft, bevor die
+/// Seite gelesen wird).
+macro_rules! start_skript {
+    ($wert:literal) => {
+        concat!(
+            "(function(){var s=function(){document.documentElement.dataset.darstellung=\"",
+            $wert,
+            "\";};if(document.documentElement){s();return;}",
+            "new MutationObserver(function(m,o){if(document.documentElement){s();o.disconnect();}})",
+            ".observe(document,{childList:true});})();"
+        )
+    };
+}
+
+/// Darstellung der Oberfläche (#47).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Darstellung {
+    /// Folgt der Systemeinstellung.
+    #[default]
+    Automatisch,
+    Hell,
+    Dunkel,
+}
+
+impl Darstellung {
+    /// Fenster-Thema für Tauri: `None` heisst „wie das System“.
+    pub fn fenster_thema(self) -> Option<tauri::Theme> {
+        match self {
+            Darstellung::Automatisch => None,
+            Darstellung::Hell => Some(tauri::Theme::Light),
+            Darstellung::Dunkel => Some(tauri::Theme::Dark),
+        }
+    }
+
+    /// Skript, das die Wahl vor dem ersten Zeichnen am `<html>`-Element setzt (siehe
+    /// `src/einstellungen/darstellung.ts`). Bei „Automatisch“ genügt das CSS.
+    pub fn start_skript(self) -> Option<&'static str> {
+        match self {
+            Darstellung::Automatisch => None,
+            Darstellung::Hell => Some(start_skript!("hell")),
+            Darstellung::Dunkel => Some(start_skript!("dunkel")),
+        }
+    }
+}
+
+/// Unbekannte Werte (z. B. von Hand verändert) ergeben „Automatisch“, statt die ganze
+/// Einstellungsdatei unlesbar zu machen.
+fn darstellung_nachsichtig<'de, D: Deserializer<'de>>(d: D) -> Result<Darstellung, D::Error> {
+    let wert = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(wert).unwrap_or_default())
 }
 
 impl Default for Einstellungen {
@@ -40,6 +96,7 @@ impl Default for Einstellungen {
             externe_inhalte_erlaubt: Vec::new(),
             proxy_externe_bilder: false,
             proxy_adresse: String::new(),
+            darstellung: Darstellung::Automatisch,
         }
     }
 }
@@ -134,6 +191,12 @@ impl EinstellungsSpeicher {
         self.extern_erlaubt(absender).await
     }
 
+    /// Speichert die Darstellung (#47).
+    pub async fn darstellung_setzen(&self, darstellung: Darstellung) -> Result<(), Fehlermeldung> {
+        self.aendern(|e| e.darstellung = darstellung).await?;
+        Ok(())
+    }
+
     /// Nimmt einen Absender aus der Liste „externe Inhalte immer erlauben“.
     pub async fn extern_entfernen(&self, absender: &str) -> Result<(), Fehlermeldung> {
         let absender = absender.trim().to_lowercase();
@@ -203,6 +266,63 @@ mod tests {
         assert!(!geladen.proxy_externe_bilder);
         assert!(geladen.proxy_adresse.is_empty());
         assert_eq!(speicher.bilder_proxy().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn darstellung_ist_standardmaessig_automatisch_und_alte_dateien_laden() {
+        let ordner = tempfile::tempdir().unwrap();
+        let speicher = EinstellungsSpeicher::neu(ordner.path());
+        assert_eq!(speicher.laden().await.darstellung, Darstellung::Automatisch);
+        // Datei von Version 0.3.0 ohne das Feld
+        std::fs::write(
+            ordner.path().join("einstellungen.json"),
+            r#"{"lokal_speichern":false,"externe_inhalte_erlaubt":["anna@example.org"],"proxy_externe_bilder":false,"proxy_adresse":""}"#,
+        )
+        .unwrap();
+        let geladen = speicher.laden().await;
+        assert_eq!(geladen.darstellung, Darstellung::Automatisch);
+        assert!(!geladen.lokal_speichern);
+        assert_eq!(geladen.externe_inhalte_erlaubt, vec!["anna@example.org"]);
+
+        speicher
+            .darstellung_setzen(Darstellung::Dunkel)
+            .await
+            .unwrap();
+        let inhalt = std::fs::read_to_string(ordner.path().join("einstellungen.json")).unwrap();
+        assert!(inhalt.contains(r#""darstellung": "dunkel""#), "{inhalt}");
+        let neu = EinstellungsSpeicher::neu(ordner.path()).laden().await;
+        assert_eq!(neu.darstellung, Darstellung::Dunkel);
+        assert!(!neu.lokal_speichern);
+
+        // Unbekannter Wert: nur die Darstellung fällt auf „Automatisch“ zurück, der Rest bleibt.
+        std::fs::write(
+            ordner.path().join("einstellungen.json"),
+            r#"{"lokal_speichern":false,"externe_inhalte_erlaubt":["anna@example.org"],"darstellung":"lila"}"#,
+        )
+        .unwrap();
+        let verdorben = speicher.laden().await;
+        assert_eq!(verdorben.darstellung, Darstellung::Automatisch);
+        assert_eq!(verdorben.externe_inhalte_erlaubt, vec!["anna@example.org"]);
+    }
+
+    #[test]
+    fn darstellung_fuer_fenster_und_startskript() {
+        assert_eq!(Darstellung::Automatisch.fenster_thema(), None);
+        assert_eq!(
+            Darstellung::Dunkel.fenster_thema(),
+            Some(tauri::Theme::Dark)
+        );
+        assert_eq!(Darstellung::Hell.fenster_thema(), Some(tauri::Theme::Light));
+        assert_eq!(Darstellung::Automatisch.start_skript(), None);
+        let skript = Darstellung::Dunkel.start_skript().unwrap();
+        assert!(
+            skript.contains(r#"dataset.darstellung="dunkel""#),
+            "{skript}"
+        );
+        assert!(Darstellung::Hell
+            .start_skript()
+            .unwrap()
+            .contains(r#"dataset.darstellung="hell""#));
     }
 
     #[tokio::test]

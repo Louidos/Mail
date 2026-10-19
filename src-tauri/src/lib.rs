@@ -35,6 +35,45 @@ use konto::KontoVerwaltung;
 /// Name des Ereignisses, über das die Oberfläche von neuen Mails erfährt.
 pub const MAIL_EREIGNIS: &str = "mail-ereignis";
 
+/// Kennung des Hauptfensters (siehe `tauri.conf.json` und `capabilities/default.json`).
+pub const HAUPTFENSTER: &str = "main";
+
+/// Grundfarbe der dunklen Darstellung (`--grund` in `src/styles.css`), damit das Fenster
+/// schon vor dem ersten Zeichnen dunkel ist.
+const DUNKLER_GRUND: tauri::window::Color = tauri::window::Color(0x0f, 0x17, 0x2a, 0xff);
+
+/// Erzeugt das Hauptfenster aus `tauri.conf.json` (dort `create: false`) mit der gespeicherten
+/// Darstellung (#47): Titelleiste und Fenstergrund passen sofort, und das Startskript setzt die
+/// Wahl, bevor die Seite gezeichnet wird – so blitzt nichts hell auf.
+fn hauptfenster_erzeugen(
+    app: &tauri::App,
+    darstellung: einstellungen::Darstellung,
+) -> tauri::Result<()> {
+    let konfiguration = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|f| f.label == HAUPTFENSTER)
+        .cloned()
+        .unwrap_or_default();
+    let mut bauer = tauri::WebviewWindowBuilder::from_config(app.handle(), &konfiguration)?
+        .theme(darstellung.fenster_thema());
+    if let Some(skript) = darstellung.start_skript() {
+        bauer = bauer.initialization_script(skript);
+    }
+    if darstellung == einstellungen::Darstellung::Dunkel {
+        bauer = bauer.background_color(DUNKLER_GRUND);
+    }
+    let fenster = bauer.build()?;
+    if darstellung == einstellungen::Darstellung::Automatisch
+        && fenster.theme().ok() == Some(tauri::Theme::Dark)
+    {
+        let _ = fenster.set_background_color(Some(DUNKLER_GRUND));
+    }
+    Ok(())
+}
+
 /// Startet die Tauri-Anwendung.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -49,8 +88,9 @@ pub fn run() {
             let schluesselbund: Arc<dyn Schluesselbund> = Arc::new(SystemSchluesselbund);
             let konten = Arc::new(KontoVerwaltung::neu(&ordner, schluesselbund.clone()));
             let einstellungen = Arc::new(EinstellungsSpeicher::neu(&ordner));
-            let lokal_speichern =
-                tauri::async_runtime::block_on(einstellungen.laden()).lokal_speichern;
+            let gespeichert = tauri::async_runtime::block_on(einstellungen.laden());
+            let lokal_speichern = gespeichert.lokal_speichern;
+            hauptfenster_erzeugen(app, gespeichert.darstellung)?;
             // Verschlüsselter Speicher (Standard) oder nur Arbeitsspeicher.
             let (cache, speicher_hinweis) =
                 AppZustand::speicher_einrichten(&ordner, schluesselbund.as_ref(), lokal_speichern);
@@ -115,6 +155,7 @@ pub fn run() {
             befehle::lokalen_speicher_leeren,
             befehle::absender_extern_entfernen,
             befehle::proxy_setzen,
+            befehle::darstellung_setzen,
             befehle::anhang_waehlen,
             befehle::mail_anhaenge_uebernehmen,
             befehle::mail_senden,

@@ -34,7 +34,7 @@ describe("abgeschottete Anzeige", () => {
 
   it("übernimmt die Farben aus den zentralen CSS-Variablen", () => {
     const stil = document.createElement("style");
-    stil.textContent = ":root { --weiss: #ffffff; --text: #1f2937; --blau: #2563eb; }";
+    stil.textContent = ":root { --mail-grund: #ffffff; --mail-text: #1f2937; --mail-link: #2563eb; --text: #f1f5f9; }";
     document.head.append(stil);
     try {
       expect(mailFarben()).toEqual({ hintergrund: "#ffffff", text: "#1f2937", link: "#2563eb" });
@@ -49,7 +49,7 @@ describe("abgeschottete Anzeige", () => {
   it("nimmt ohne Design oder bei ungültigen Werten die Systemfarben", () => {
     expect(mailFarben()).toEqual({ hintergrund: "Canvas", text: "CanvasText", link: "LinkText" });
     const stil = document.createElement("style");
-    stil.textContent = ":root { --text: red}body{x:1; }";
+    stil.textContent = ":root { --mail-text: red}body{x:1; }";
     document.head.append(stil);
     try {
       expect(mailFarben().text).toBe("CanvasText");

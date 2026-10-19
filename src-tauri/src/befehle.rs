@@ -7,13 +7,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use zeroize::Zeroizing;
 
 use crate::anzeige::{self, extern_inhalte, AufbereiteteMail};
-use crate::einstellungen::EinstellungsSpeicher;
+use crate::einstellungen::{Darstellung, EinstellungsSpeicher};
 use crate::fehler::Fehlermeldung;
 use crate::imap::beobachter::{Beobachter, Melder};
 use crate::imap::cache::{MailCache, SpeicherCache};
@@ -81,6 +81,7 @@ pub struct EinstellungenAnsicht {
     pub proxy_externe_bilder: bool,
     pub proxy_adresse: String,
     pub speicher_hinweis: Option<String>,
+    pub darstellung: Darstellung,
 }
 
 #[tauri::command]
@@ -398,6 +399,7 @@ pub async fn einstellungen_laden(
         proxy_externe_bilder: einstellungen.proxy_externe_bilder,
         proxy_adresse: einstellungen.proxy_adresse,
         speicher_hinweis: zustand.speicher_hinweis.lock().ok().and_then(|h| h.clone()),
+        darstellung: einstellungen.darstellung,
     })
 }
 
@@ -459,6 +461,25 @@ pub async fn proxy_setzen(
     adresse: String,
 ) -> Result<(), Fehlermeldung> {
     zustand.einstellungen.proxy_setzen(an, &adresse).await
+}
+
+/// Speichert die Darstellung (#47) und passt die Titelleiste des Fensters an. Die Farben der
+/// Oberfläche setzt das Frontend selbst.
+#[tauri::command]
+pub async fn darstellung_setzen(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+    darstellung: Darstellung,
+) -> Result<(), Fehlermeldung> {
+    zustand
+        .einstellungen
+        .darstellung_setzen(darstellung)
+        .await?;
+    if let Some(fenster) = app.get_webview_window(crate::HAUPTFENSTER) {
+        // Nur Optik: Scheitert es (z. B. ohne Unterstützung des Systems), bleibt die Wahl gespeichert.
+        let _ = fenster.set_theme(darstellung.fenster_thema());
+    }
+    Ok(())
 }
 
 /// Öffnet den Dialog „Datei anhängen“ (im Backend) und trägt die Dateien ins Register ein.

@@ -159,6 +159,17 @@ Gesendete Mails werden per IMAP im Ordner „Gesendet“ des Kontos abgelegt (gi
 Manche Anbieter (z. B. Gmail) tun das selbst; dann im Konto **Gesendete Mails im Ordner „Gesendet“ ablegen** ausschalten,
 sonst liegen sie doppelt dort.
 
+## Darstellung hell oder dunkel
+
+Unter **Einstellungen** → **Darstellung** wählst du **Automatisch (wie das System)**, **Hell** oder **Dunkel**.
+
+- Standard ist **Automatisch**: SicherMail folgt der Hell-/Dunkel-Einstellung deines Systems, auch wenn sie sich
+  während des Betriebs ändert.
+- Die Wahl wirkt sofort und bleibt nach einem Neustart erhalten; auch die Titelleiste des Fensters zieht mit,
+  soweit das System das unterstützt.
+- Der Inhalt von Mails bleibt auch in der dunklen Darstellung auf hellem Grund, weil viele HTML-Mails nur für
+  weissen Hintergrund gestaltet sind. Nur der Rahmen drumherum ist dunkel.
+
 ## Lesen ohne Internet (lokaler Speicher)
 
 Unter **Einstellungen** steht **Mails lokal speichern (verschlüsselt)** – standardmässig eingeschaltet.
