@@ -86,7 +86,8 @@ SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keine
   einem abgeschotteten Bereich angezeigt, in dem nichts ausgeführt und nichts aus dem Internet geladen wird.
 - **Externe Inhalte** (z. B. Bilder von Webseiten, oft unsichtbare „Tracking-Pixel“) sind blockiert.
   Eine Leiste zeigt, wie viele blockiert wurden:
-  - **Externe Inhalte laden** lädt sie für diese eine Mail – nur über verschlüsseltes HTTPS.
+  - **Externe Inhalte laden** lädt sie für diese eine Mail – nur über verschlüsseltes HTTPS und immer direkt,
+    nie über einen Proxy. Kommt dein Rechner nur über einen Proxy ins Internet, bleiben externe Bilder deshalb leer.
   - **Für … immer erlauben** lädt sie bei diesem Absender künftig automatisch.
 - **Links** öffnen sich erst nach einem Klick im Standardbrowser. Beim Überfahren mit der Maus siehst du das
   echte Ziel. Zeigt der Linktext eine andere Adresse als das echte Ziel (typisch für Phishing), warnt

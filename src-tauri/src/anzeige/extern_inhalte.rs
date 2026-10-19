@@ -5,6 +5,8 @@
 //! - Keine Cookies, kein Referer.
 //! - Keine Adressen im eigenen Netz (localhost, private, Link-Local …), auch nicht über
 //!   Weiterleitungen oder DNS: Eine Mail soll so keine Geräte im Heimnetz ansprechen können.
+//! - Nie über einen Proxy, auch nicht über einen im System eingestellten (`HTTPS_PROXY` …):
+//!   Ein Proxy löst Namen selbst auf, die Prüfung auf eigene Netzadressen griffe dann nicht (#24).
 //!
 //! Die Bilder werden als `data:`-Adressen in die bereinigte Mail eingesetzt, damit die
 //! Anzeige selbst nie Verbindungen aufbaut.
@@ -36,6 +38,8 @@ pub async fn bilder_laden(adressen: &[String]) -> HashMap<String, String> {
             }
         }))
         .dns_resolver(Arc::new(NurOeffentlich))
+        // Nie über einen Proxy: Er würde Namen selbst auflösen und `NurOeffentlich` umgehen (#24).
+        .no_proxy()
         .timeout(Duration::from_secs(15))
         .referer(false)
         .build()
