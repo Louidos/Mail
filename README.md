@@ -1,0 +1,80 @@
+# SicherMail
+
+SicherMail ist ein sicherer Open-Source-Mailclient für den Desktop (Windows, macOS, Linux).
+Du gibst deinen eigenen IMAP- und SMTP-Server an; SicherMail verbindet sich nur verschlüsselt
+und nur mit den Servern, die du selbst eingetragen hast.
+
+Grundsätze:
+
+- Verbindungen nur über TLS oder STARTTLS, Zertifikate werden immer geprüft.
+- Passwörter liegen ausschliesslich im Schlüsselbund des Betriebssystems.
+- Keine Telemetrie, keine Fremddienste.
+
+## Projektstand
+
+Version: **0.0.0** (in Entwicklung, noch keine veröffentlichte Version)
+
+- [x] Grundgerüst (Tauri 2, leeres Fenster)
+- [ ] Konto mit eigenem Mailserver einrichten
+- [ ] Mails empfangen (IMAP, IDLE)
+- [ ] Mails sicher anzeigen
+- [ ] Verschlüsselter lokaler Speicher
+- [ ] Mails senden (SMTP)
+
+Änderungen stehen im [CHANGELOG](CHANGELOG.md).
+
+## Installation für Entwicklung
+
+Voraussetzungen:
+
+- [Rust](https://www.rust-lang.org/tools/install) (stabil, mindestens 1.80)
+- [Node.js](https://nodejs.org/) 22 mit npm
+- Systembibliotheken für Tauri 2, siehe <https://v2.tauri.app/start/prerequisites/>.
+  Unter Debian/Ubuntu:
+
+  ```sh
+  sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libdbus-1-dev
+  ```
+
+Abhängigkeiten installieren:
+
+```sh
+npm ci
+```
+
+## Start
+
+```sh
+npm run tauri dev      # Programm im Entwicklungsmodus starten
+npm run tauri build    # Installationspaket bauen
+```
+
+## Tests und Prüfungen
+
+```sh
+npm test               # Frontend-Tests (Vitest)
+npm run lint           # ESLint und TypeScript-Prüfung
+cd src-tauri
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+```
+
+## Aufbau
+
+| Ordner       | Inhalt                                                           |
+| ------------ | ---------------------------------------------------------------- |
+| `src/`       | Frontend (TypeScript, Vite)                                      |
+| `src-tauri/` | Rust-Backend (Tauri 2)                                           |
+| `public/`    | statische Dateien (Icons)                                        |
+| `tests/`     | Frontend-Tests und Integrationstests gegen einen Test-Mailserver |
+| `docs/`      | Doku: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md) |
+| `scripts/`   | Hilfsskripte                                                     |
+
+## Sicherheit
+
+Sicherheitslücken bitte nicht öffentlich melden, sondern wie in [SECURITY.md](SECURITY.md) beschrieben.
+
+## Lizenz
+
+SicherMail steht unter der [GNU General Public License v3.0 oder später](LICENSE) (GPL-3.0-or-later).
