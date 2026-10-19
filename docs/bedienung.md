@@ -188,6 +188,53 @@ Kommt dein Rechner nur über einen Proxy ins Internet (z. B. im Firmennetz), kan
   Bilder aus deinem eigenen Netz geladen werden. Offensichtliche Adressen im eigenen Netz (z. B. `192.168.…`,
   `localhost`) lehnt SicherMail trotzdem ab, bevor sie den Proxy erreichen.
 
+## Verschlüsselung mit OpenPGP
+
+Mit OpenPGP verschlüsselte Mails kann nur lesen, wer den passenden privaten Schlüssel hat – auch der Mailserver nicht.
+Signaturen zeigen, ob eine Mail wirklich vom Inhaber eines Schlüssels stammt und unverändert ist.
+
+### Schlüssel verwalten
+
+Links unten öffnet **Schlüssel (OpenPGP)** die Schlüsselverwaltung.
+
+- **Eigener Schlüssel** (einer pro Konto):
+  - **Schlüssel erzeugen**: Passphrase (mindestens 8 Zeichen) zweimal eingeben. SicherMail erzeugt einen modernen
+    Schlüssel (Ed25519/Cv25519) mit deinem Namen und deiner Adresse.
+  - **Eigenen Schlüssel importieren …**: Passphrase eingeben, dann die Datei wählen (ASCII-armored, z. B. aus
+    `gpg --armor --export-secret-keys`). Die Passphrase muss stimmen, und eine User-ID des Schlüssels muss die Adresse
+    des Kontos enthalten.
+  - **Öffentlichen Schlüssel exportieren …** speichert deinen öffentlichen Schlüssel als `.asc`-Datei. Gib ihn an
+    deine Kontakte weiter, damit sie dir verschlüsselt schreiben können. Der private Schlüssel verlässt das Gerät nie.
+  - **Löschen** (mit Rückfrage) entfernt den Schlüssel endgültig. Mails, die an ihn verschlüsselt sind, kannst du
+    danach nicht mehr lesen – bewahre eine Sicherung auf, wenn du sie brauchst.
+- **Schlüssel anderer**: **Öffentlichen Schlüssel importieren …** liest eine `.asc`-Datei. Hängt ein Schlüssel an einer
+  Mail, steht dort beim Anhang **Schlüssel importieren**. Vergleiche den angezeigten **Fingerabdruck** mit der Person
+  (z. B. am Telefon), bevor du dich darauf verlässt.
+- Schlüsselserver werden nie abgefragt.
+
+### Verschlüsselte und signierte Mails lesen
+
+Über dem Inhalt einer Mail steht, was SicherMail festgestellt hat (immer mit Symbol und Text):
+
+| Anzeige | Bedeutung |
+| --- | --- |
+| 🔒 Verschlüsselt | Die Mail war verschlüsselt und wurde entschlüsselt. |
+| 🔒 Kann nicht entschlüsselt werden | Kein passender Schlüssel, Passphrase fehlt, oder die Mail ist beschädigt bzw. manipuliert. |
+| ⚠ Nur teilweise verschlüsselt | Nur ein Teil der Mail ist verschlüsselt. Er wird aus Sicherheitsgründen nicht automatisch entschlüsselt. |
+| ✓ Signiert und gültig (Schlüssel von …) | Die Signatur stimmt, und der Schlüssel gehört zur Absenderadresse. |
+| ⚠ Signatur gültig, aber der Schlüssel gehört nicht zur Absenderadresse | Signiert hat jemand anderes als der angegebene Absender. |
+| ✗ Signatur ungültig | Die Mail wurde nach dem Signieren verändert, oder die Signatur ist beschädigt. |
+| ? Signiert, Schlüssel unbekannt | Den Schlüssel des Absenders hast du (noch) nicht importiert. |
+| ⚠ Nur ein Teil dieser Mail ist signiert | Was ausserhalb des signierten Teils steht, kann von jemand anderem stammen. |
+
+- Braucht der Schlüssel seine **Passphrase**, erscheint ein Eingabefeld. Nach **Entsperren** zeigt SicherMail die Mail
+  entschlüsselt an. Die Passphrase wird nicht gespeichert, sondern nur bis zum Beenden von SicherMail im
+  Arbeitsspeicher gehalten.
+- Entschlüsselte Mails werden genauso sicher angezeigt wie alle anderen (keine Skripte, externe Inhalte blockiert).
+- Im lokalen Speicher bleibt nur die verschlüsselte Fassung; der entschlüsselte Text wird nirgends abgelegt.
+- Erkannt werden PGP/MIME (wie von Thunderbird, Enigmail, Mailvelope …) und Inline-PGP im Text.
+- Mails verschlüsselt **senden** kommt in einem nächsten Schritt.
+
 ## Wo liegen meine Daten?
 
 - Kontoeinstellungen ohne Passwort: `konten.json` im App-Datenordner
@@ -197,3 +244,6 @@ Kommt dein Rechner nur über einen Proxy ins Internet (z. B. im Firmennetz), kan
 - Zwischengespeicherte Mails: `mails.db` im App-Datenordner, verschlüsselt mit SQLCipher; der Schlüssel liegt im
   Schlüsselbund (Eintrag `speicher:schluessel`).
 - Einstellungen (inkl. freigegebener Absender und Proxy-Adresse): `einstellungen.json` im App-Datenordner.
+- OpenPGP-Schlüssel: `schluessel.db` im App-Datenordner, verschlüsselt mit SQLCipher; der Schlüssel liegt im
+  Schlüsselbund (Eintrag `pgp:schluessel`). Private Schlüssel sind zusätzlich mit deiner Passphrase geschützt.
+  „Lokalen Speicher leeren“ lässt diese Datei unberührt.

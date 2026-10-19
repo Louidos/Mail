@@ -26,7 +26,7 @@ pub const DATEINAME: &str = "mails.db";
 const SCHEMA_VERSION: i32 = 1;
 
 /// Fehlerart: Die Datei passt nicht zum Schlüssel (oder ist keine Datenbank).
-const UNLESBAR: &str = "speicher_unlesbar";
+pub const UNLESBAR: &str = "speicher_unlesbar";
 
 /// So lange wird gewartet, wenn die Datei gerade von einem anderen Zugriff gesperrt ist.
 const SPERRE_WARTEN: std::time::Duration = std::time::Duration::from_secs(5);
@@ -44,7 +44,15 @@ fn fehler(_: rusqlite::Error) -> Fehlermeldung {
 pub fn schluessel_holen(
     schluesselbund: &dyn Schluesselbund,
 ) -> Result<(Zeroizing<[u8; 32]>, bool), Fehlermeldung> {
-    if let Some(gespeichert) = schluesselbund.lesen(SCHLUESSEL_EINTRAG)? {
+    schluessel_holen_fuer(schluesselbund, SCHLUESSEL_EINTRAG)
+}
+
+/// Wie [`schluessel_holen`], aber für einen beliebigen Schlüsselbund-Eintrag.
+pub fn schluessel_holen_fuer(
+    schluesselbund: &dyn Schluesselbund,
+    eintrag: &str,
+) -> Result<(Zeroizing<[u8; 32]>, bool), Fehlermeldung> {
+    if let Some(gespeichert) = schluesselbund.lesen(eintrag)? {
         let mut schluessel = Zeroizing::new([0u8; 32]);
         if hex::decode_to_slice(gespeichert.as_bytes(), schluessel.as_mut()).is_ok() {
             return Ok((schluessel, false));
@@ -55,8 +63,52 @@ pub fn schluessel_holen(
         .fill(schluessel.as_mut())
         .map_err(|_| Fehlermeldung::neu("speicher", "Es konnte kein Schlüssel erzeugt werden."))?;
     let text = Zeroizing::new(hex::encode(schluessel.as_ref()));
-    schluesselbund.setzen(SCHLUESSEL_EINTRAG, &text)?;
+    schluesselbund.setzen(eintrag, &text)?;
     Ok((schluessel, true))
+}
+
+/// Öffnet eine mit SQLCipher verschlüsselte Datenbank (Rohschlüssel), prüft den Schlüssel und
+/// schaltet `secure_delete` ein. Passt der Schlüssel nicht, ist die Fehlerart [`UNLESBAR`].
+pub fn verschluesselt_oeffnen(
+    pfad: &Path,
+    schluessel: &[u8; 32],
+) -> Result<Connection, Fehlermeldung> {
+    if let Some(ordner) = pfad.parent() {
+        std::fs::create_dir_all(ordner).map_err(|_| {
+            Fehlermeldung::neu("speicher", "Der Datenordner konnte nicht angelegt werden.")
+        })?;
+    }
+    let verbindung = Connection::open(pfad).map_err(fehler)?;
+    verbindung.busy_timeout(SPERRE_WARTEN).map_err(fehler)?;
+    // Keine SQLCipher-Meldungen auf der Konsole.
+    let _ = verbindung.execute_batch("PRAGMA cipher_log_level = NONE;");
+    // Rohschlüssel (kein Passwort): x'<64 Hex-Zeichen>'
+    let pragma = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", hex::encode(schluessel)));
+    verbindung.execute_batch(&pragma).map_err(fehler)?;
+    // Prüft, ob der Schlüssel passt (sonst: „file is not a database“).
+    verbindung
+        .query_row("SELECT count(*) FROM sqlite_master", [], |z| {
+            z.get::<_, i64>(0)
+        })
+        .map_err(|e| match e.sqlite_error_code() {
+            Some(rusqlite::ErrorCode::NotADatabase) => {
+                Fehlermeldung::neu(UNLESBAR, "Der lokale Speicher passt nicht zum Schlüssel.")
+            }
+            _ => fehler(e),
+        })?;
+    verbindung
+        .execute_batch(
+            "PRAGMA secure_delete = ON;
+             PRAGMA journal_mode = DELETE;
+             PRAGMA foreign_keys = ON;",
+        )
+        .map_err(fehler)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(pfad, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(verbindung)
 }
 
 /// Mails im verschlüsselten Speicher.
@@ -97,35 +149,10 @@ impl SqlCache {
     }
 
     fn oeffnen_versuch(pfad: &Path, schluessel: &[u8; 32]) -> Result<Self, Fehlermeldung> {
-        if let Some(ordner) = pfad.parent() {
-            std::fs::create_dir_all(ordner).map_err(|_| {
-                Fehlermeldung::neu("speicher", "Der Datenordner konnte nicht angelegt werden.")
-            })?;
-        }
-        let verbindung = Connection::open(pfad).map_err(fehler)?;
-        verbindung.busy_timeout(SPERRE_WARTEN).map_err(fehler)?;
-        // Keine SQLCipher-Meldungen auf der Konsole.
-        let _ = verbindung.execute_batch("PRAGMA cipher_log_level = NONE;");
-        // Rohschlüssel (kein Passwort): x'<64 Hex-Zeichen>'
-        let pragma = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", hex::encode(schluessel)));
-        verbindung.execute_batch(&pragma).map_err(fehler)?;
-        // Prüft, ob der Schlüssel passt (sonst: „file is not a database“).
-        verbindung
-            .query_row("SELECT count(*) FROM sqlite_master", [], |z| {
-                z.get::<_, i64>(0)
-            })
-            .map_err(|e| match e.sqlite_error_code() {
-                Some(rusqlite::ErrorCode::NotADatabase) => {
-                    Fehlermeldung::neu(UNLESBAR, "Der lokale Speicher passt nicht zum Schlüssel.")
-                }
-                _ => fehler(e),
-            })?;
+        let verbindung = verschluesselt_oeffnen(pfad, schluessel)?;
         verbindung
             .execute_batch(
-                "PRAGMA secure_delete = ON;
-                 PRAGMA journal_mode = DELETE;
-                 PRAGMA foreign_keys = ON;
-                 CREATE TABLE IF NOT EXISTS ordner_stand (
+                "CREATE TABLE IF NOT EXISTS ordner_stand (
                      konto TEXT NOT NULL,
                      ordner TEXT NOT NULL,
                      uidvalidity INTEGER NOT NULL,
@@ -157,11 +184,6 @@ impl SqlCache {
         verbindung
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(fehler)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(pfad, std::fs::Permissions::from_mode(0o600));
-        }
         Ok(Self {
             verbindung: Mutex::new(verbindung),
             pfad: pfad.to_path_buf(),

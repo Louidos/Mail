@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use zeroize::Zeroizing;
 
 use crate::anzeige::{self, extern_inhalte, AufbereiteteMail};
 use crate::einstellungen::EinstellungsSpeicher;
@@ -21,6 +22,9 @@ use crate::imap::ordner::Ordner;
 use crate::konto::autoconfig::{self, Vorschlag};
 use crate::konto::schluesselbund::Schluesselbund;
 use crate::konto::{Konto, KontoEingabe, KontoVerwaltung, Pruefergebnis};
+use crate::pgp::lesen::{Verarbeitet, Verschluesselung};
+use crate::pgp::schluessel::SchluesselInfo;
+use crate::pgp::{PgpDienst, Uebersicht};
 use crate::smtp::anhaenge::{AnhangAuswahl, Eintrag, Quelle};
 use crate::smtp::dienst::{SendeDienst, SendeErgebnis};
 use crate::smtp::entwurf::Entwurf;
@@ -38,6 +42,7 @@ pub struct AppZustand {
     pub einstellungen: Arc<EinstellungsSpeicher>,
     pub senden: Arc<SendeDienst>,
     pub schluesselbund: Arc<dyn Schluesselbund>,
+    pub pgp: Arc<PgpDienst>,
     pub datenordner: PathBuf,
     /// Hinweis, falls der verschlüsselte Speicher nicht geöffnet werden konnte.
     pub speicher_hinweis: Mutex<Option<String>>,
@@ -219,10 +224,14 @@ pub async fn mail_anzeigen(
         .await?
         .absender_kennung()
         .to_string();
-    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let (roh, verarbeitet) = anzeige_inhalt(&zustand, &konto, &ordner, uid).await?;
+    // Die Absenderprüfung gilt der äusseren Mail, wie sie der eigene Server empfangen hat.
     let pruefung = anzeige::absender_pruefen(&roh, &kennung)?;
-    let mut mail = anzeige::aufbereiten(&roh, None)?;
+    // Verschlüsselte Mails werden entschlüsselt angezeigt; der Klartext bleibt im Speicher.
+    let anzeige_roh: &[u8] = verarbeitet.roh.as_deref().map_or(&roh[..], |r| &r[..]);
+    let mut mail = anzeige::aufbereiten(anzeige_roh, None)?;
     mail.absender_pruefung = pruefung.clone();
+    mail.pgp = verarbeitet.status.clone();
     if mail.extern_blockiert == 0 {
         return Ok(mail);
     }
@@ -233,11 +242,51 @@ pub async fn mail_anzeigen(
     let Ok(proxy) = zustand.einstellungen.bilder_proxy().await else {
         return Ok(mail);
     };
-    let adressen = anzeige::externe_adressen(&roh)?;
+    let adressen = anzeige::externe_adressen(anzeige_roh)?;
     let geladen = extern_inhalte::bilder_laden(&adressen, proxy.as_ref()).await;
-    let mut mail = anzeige::aufbereiten(&roh, Some(&geladen))?;
+    let mut mail = anzeige::aufbereiten(anzeige_roh, Some(&geladen))?;
     mail.absender_pruefung = pruefung;
+    mail.pgp = verarbeitet.status;
     Ok(mail)
+}
+
+/// Rohe Mail vom Server bzw. aus dem Speicher und – bei OpenPGP – die entschlüsselte bzw.
+/// geprüfte Fassung zur Anzeige. Die entschlüsselte Fassung wird nie gespeichert.
+async fn anzeige_inhalt(
+    zustand: &AppZustand,
+    konto: &str,
+    ordner: &str,
+    uid: u32,
+) -> Result<(Vec<u8>, Verarbeitet), Fehlermeldung> {
+    let roh = zustand.imap.inhalt(konto, ordner, uid).await?;
+    let pgp = zustand.pgp.clone();
+    let kopie = roh.clone();
+    // Entschlüsseln und Schlüsselableitung brauchen Rechenzeit: nicht im Ereignis-Thread.
+    let verarbeitet = tokio::task::spawn_blocking(move || pgp.verarbeiten(&kopie))
+        .await
+        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler beim Entschlüsseln."))?;
+    Ok((roh, verarbeitet))
+}
+
+/// Die Mail so, wie sie angezeigt wird (bei verschlüsselten Mails der Klartext), z. B. für
+/// Anhänge. Kann sie nicht entschlüsselt werden, gibt es einen Fehler.
+async fn anzeige_roh(
+    zustand: &AppZustand,
+    konto: &str,
+    ordner: &str,
+    uid: u32,
+) -> Result<Zeroizing<Vec<u8>>, Fehlermeldung> {
+    let (roh, verarbeitet) = anzeige_inhalt(zustand, konto, ordner, uid).await?;
+    if verarbeitet.status.verschluesselung == Verschluesselung::NichtEntschluesselt {
+        return Err(Fehlermeldung::neu(
+            "pgp",
+            verarbeitet
+                .status
+                .meldung
+                .unwrap_or_else(|| "Die Mail kann nicht entschlüsselt werden.".into()),
+        ));
+    }
+    Ok(verarbeitet.roh.unwrap_or_else(|| Zeroizing::new(roh)))
 }
 
 /// Erlaubt externe Inhalte für einen Absender dauerhaft.
@@ -260,7 +309,7 @@ pub async fn anhang_speichern(
     uid: u32,
     index: usize,
 ) -> Result<Option<String>, Fehlermeldung> {
-    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let roh = anzeige_roh(&zustand, &konto, &ordner, uid).await?;
     let (name, daten) = anzeige::anhang_inhalt(&roh, index)?;
     let (sender, empfaenger) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -447,7 +496,7 @@ pub async fn mail_anhaenge_uebernehmen(
     ordner: String,
     uid: u32,
 ) -> Result<Vec<AnhangAuswahl>, Fehlermeldung> {
-    let roh = zustand.imap.inhalt(&konto, &ordner, uid).await?;
+    let roh = anzeige_roh(&zustand, &konto, &ordner, uid).await?;
     let nachricht = anzeige::parsen(&roh)?;
     Ok(anzeige::anhaenge(&nachricht)
         .into_iter()
@@ -498,6 +547,170 @@ pub async fn entwurf_loeschen(
     id: String,
 ) -> Result<(), Fehlermeldung> {
     zustand.senden.entwurf_loeschen(&id)
+}
+
+// ---- OpenPGP-Schlüssel (#44) ----
+
+/// Alle Schlüssel (ohne geheime Teile).
+#[tauri::command]
+pub async fn pgp_uebersicht(zustand: State<'_, AppZustand>) -> Result<Uebersicht, Fehlermeldung> {
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.uebersicht()).await
+}
+
+/// Führt rechenintensive OpenPGP-Arbeit (Schlüsselableitung) ausserhalb des Ereignis-Threads aus.
+async fn blockierend<T: Send + 'static>(
+    arbeit: impl FnOnce() -> Result<T, Fehlermeldung> + Send + 'static,
+) -> Result<T, Fehlermeldung> {
+    tokio::task::spawn_blocking(arbeit)
+        .await
+        .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler bei OpenPGP."))?
+}
+
+/// Erzeugt einen eigenen Schlüssel für ein Konto, geschützt mit der Passphrase.
+#[tauri::command]
+pub async fn pgp_erzeugen(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    passphrase: Zeroizing<String>,
+) -> Result<SchluesselInfo, Fehlermeldung> {
+    let konto = zustand.konten.finden(&konto).await?;
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.erzeugen(&konto.id, &konto.name, &konto.email, &passphrase)).await
+}
+
+/// Liest eine Datei, die der Nutzer im Backend-Dialog wählt (höchstens 1 MB).
+async fn schluesseldatei_waehlen(
+    app: &AppHandle,
+    titel: &str,
+) -> Result<Option<Zeroizing<Vec<u8>>>, Fehlermeldung> {
+    let (sender, empfaenger) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title(titel)
+        .add_filter("OpenPGP-Schlüssel", &["asc", "gpg", "pgp", "key"])
+        .pick_file(move |datei| {
+            let _ = sender.send(datei);
+        });
+    let Some(datei) = empfaenger.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let pfad = datei
+        .into_path()
+        .map_err(|_| Fehlermeldung::neu("datei", "Ungültige Datei."))?;
+    let daten = crate::smtp::anhaenge::datei_lesen_begrenzt(
+        &pfad,
+        crate::pgp::schluessel::MAX_SCHLUESSELDATEI as u64,
+    )
+    .await
+    .map_err(|_| Fehlermeldung::neu("datei", "Die Datei konnte nicht gelesen werden."))?
+    .ok_or_else(|| Fehlermeldung::neu("pgp", "Die Schlüsseldatei ist zu gross."))?;
+    Ok(Some(Zeroizing::new(daten)))
+}
+
+/// Importiert einen eigenen privaten Schlüssel (Dateidialog im Backend). `None` bei Abbruch.
+#[tauri::command]
+pub async fn pgp_eigenen_importieren(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    passphrase: Zeroizing<String>,
+) -> Result<Option<SchluesselInfo>, Fehlermeldung> {
+    let konto = zustand.konten.finden(&konto).await?;
+    let Some(daten) =
+        schluesseldatei_waehlen(&app, "Eigenen privaten Schlüssel importieren").await?
+    else {
+        return Ok(None);
+    };
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.eigenen_importieren(&konto.id, &konto.email, &daten, &passphrase))
+        .await
+        .map(Some)
+}
+
+/// Importiert öffentliche Schlüssel anderer aus einer Datei (Dateidialog im Backend).
+#[tauri::command]
+pub async fn pgp_oeffentliche_importieren(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+) -> Result<Vec<SchluesselInfo>, Fehlermeldung> {
+    let Some(daten) = schluesseldatei_waehlen(&app, "Öffentlichen Schlüssel importieren").await?
+    else {
+        return Ok(Vec::new());
+    };
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.oeffentliche_importieren(&daten)).await
+}
+
+/// Importiert öffentliche Schlüssel aus einem Anhang einer Mail.
+#[tauri::command]
+pub async fn pgp_aus_anhang_importieren(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: String,
+    uid: u32,
+    index: usize,
+) -> Result<Vec<SchluesselInfo>, Fehlermeldung> {
+    let roh = anzeige_roh(&zustand, &konto, &ordner, uid).await?;
+    let (_, daten) = anzeige::anhang_inhalt(&roh, index)?;
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.oeffentliche_importieren(&daten)).await
+}
+
+/// Speichert einen öffentlichen Schlüssel über „Speichern unter“. `None` bei Abbruch.
+#[tauri::command]
+pub async fn pgp_exportieren(
+    app: AppHandle,
+    zustand: State<'_, AppZustand>,
+    fingerabdruck: String,
+) -> Result<Option<String>, Fehlermeldung> {
+    let pgp = zustand.pgp.clone();
+    let (name, text) = blockierend(move || pgp.exportieren(&fingerabdruck)).await?;
+    let (sender, empfaenger) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Öffentlichen Schlüssel speichern unter …")
+        .set_file_name(crate::dateien::dateiname_saeubern(&name, "schluessel.asc"))
+        .save_file(move |pfad| {
+            let _ = sender.send(pfad);
+        });
+    let Some(pfad) = empfaenger.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let pfad = pfad
+        .into_path()
+        .map_err(|_| Fehlermeldung::neu("datei", "Ungültiger Speicherort."))?;
+    tokio::fs::write(&pfad, text.as_bytes())
+        .await
+        .map_err(|_| {
+            Fehlermeldung::neu("datei", "Der Schlüssel konnte nicht gespeichert werden.")
+        })?;
+    Ok(Some(
+        pfad.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or(name),
+    ))
+}
+
+/// Löscht einen Schlüssel endgültig (die Oberfläche fragt vorher nach).
+#[tauri::command]
+pub async fn pgp_loeschen(
+    zustand: State<'_, AppZustand>,
+    fingerabdruck: String,
+) -> Result<(), Fehlermeldung> {
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.loeschen(&fingerabdruck)).await
+}
+
+/// Entsperrt einen eigenen Schlüssel bis zum Programmende (Passphrase nur im Arbeitsspeicher).
+#[tauri::command]
+pub async fn pgp_entsperren(
+    zustand: State<'_, AppZustand>,
+    fingerabdruck: String,
+    passphrase: Zeroizing<String>,
+) -> Result<(), Fehlermeldung> {
+    let pgp = zustand.pgp.clone();
+    blockierend(move || pgp.entsperren(&fingerabdruck, &passphrase)).await
 }
 
 #[cfg(test)]

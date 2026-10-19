@@ -13,6 +13,9 @@ use crate::fehler::Fehlermeldung;
 /// Dienstname, unter dem SicherMail seine Einträge ablegt.
 pub const DIENST: &str = "SicherMail";
 
+/// Eintrag für den Datenbankschlüssel des OpenPGP-Schlüsselspeichers (`schluessel.db`).
+pub const PGP_SCHLUESSEL_EINTRAG: &str = "pgp:schluessel";
+
 /// Name des Eintrags für das Passwort eines Kontos.
 pub fn konto_schluessel(konto_id: &str) -> String {
     format!("konto:{konto_id}")

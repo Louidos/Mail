@@ -41,6 +41,9 @@ tauri-plugin-opener = "2"
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 ring = "0.17"
 hex = "0.4"
+pgp = { version = "0.21", default-features = false }
+rand = { version = "0.8", default-features = false, features = ["std", "getrandom"] }
+smallvec = "1"
 
 [profile.release]
 codegen-units = 1
@@ -48,6 +51,32 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Die Schlüsselableitung von OpenPGP (S2K) ist ohne Optimierung sehr langsam; das macht Tests
+# und Entwicklungsbuilds zäh. Nur diese Rechen-Crates werden auch im Dev-Profil optimiert.
+[profile.dev.package.pgp]
+opt-level = 3
+
+[profile.dev.package.sha1]
+opt-level = 3
+
+[profile.dev.package.sha1-checked]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
 
 [dev-dependencies]
 tokio = { version = "1.53.3", features = ["test-util"] }
@@ -83,3 +112,7 @@ path = "../tests/integration/senden.rs"
 [[test]]
 name = "extern_proxy"
 path = "../tests/integration/extern_proxy.rs"
+
+[[test]]
+name = "pgp"
+path = "../tests/integration/pgp.rs"

@@ -54,6 +54,8 @@ pub struct AufbereiteteMail {
     pub anhaenge: Vec<Anhang>,
     /// Ergebnis der Absenderprüfung des eigenen Servers (DKIM/SPF/DMARC, #45).
     pub absender_pruefung: absender::Absenderpruefung,
+    /// Ergebnis von Entschlüsselung und Signaturprüfung (OpenPGP, #44).
+    pub pgp: crate::pgp::lesen::PgpStatus,
 }
 
 /// Wie mit externen Inhalten umgegangen wird.
@@ -203,6 +205,7 @@ pub fn aufbereiten(
         extern_geladen: extern_geladen.is_some(),
         anhaenge: anhaenge(&nachricht),
         absender_pruefung: absender::Absenderpruefung::default(),
+        pgp: crate::pgp::lesen::PgpStatus::default(),
     })
 }
 

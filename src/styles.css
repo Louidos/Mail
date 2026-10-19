@@ -841,3 +841,92 @@ ul.entwurf-liste li {
     flex-wrap: wrap;
   }
 }
+
+/* OpenPGP (#44): Ergebnis in der Leseansicht – Symbol und Text, nie nur Farbe */
+.pgp-leiste {
+  display: flex;
+  flex-direction: column;
+  gap: var(--abstand-1);
+  margin: 0 0 var(--abstand-4);
+  padding: var(--abstand-2) var(--abstand-3);
+  border: 1px solid var(--blau-rand);
+  border-radius: var(--radius-gross);
+  background: var(--weiss);
+  font-size: var(--groesse-klein);
+}
+
+.pgp-zeile {
+  display: flex;
+  align-items: center;
+  gap: var(--abstand-2);
+}
+
+.pgp-zeile[data-art="gut"] {
+  color: var(--blau-dunkel);
+}
+
+.pgp-zeile[data-art="warnung"] {
+  color: var(--fehler-dunkel);
+  font-weight: 600;
+}
+
+.pgp-zeile[data-art="neutral"] {
+  color: var(--text-leise);
+}
+
+.pgp-meldung {
+  margin: 0;
+  color: var(--text);
+}
+
+form.pgp-entsperren {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--abstand-2);
+}
+
+form.pgp-entsperren input {
+  flex: 1;
+  min-width: 10rem;
+}
+
+/* Dialog „Schlüssel (OpenPGP)“ */
+dialog.schluessel-dialog {
+  max-width: min(720px, 95vw);
+}
+
+.fingerabdruck code {
+  font-family: var(--schrift-fest);
+  font-size: var(--groesse-klein);
+  overflow-wrap: anywhere;
+}
+
+.passphrase-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--abstand-2);
+  margin: var(--abstand-2) 0;
+}
+
+.passphrase-zeile input {
+  flex: 1;
+  min-width: 10rem;
+}
+
+ul.schluessel-liste {
+  list-style: none;
+  margin: 0 0 var(--abstand-3);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--abstand-3);
+}
+
+ul.schluessel-liste li {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--abstand-2);
+}
+
