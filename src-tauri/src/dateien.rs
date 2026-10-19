@@ -29,13 +29,16 @@ pub fn atomar_schreiben(pfad: &Path, inhalt: &[u8]) -> std::io::Result<()> {
 }
 
 /// Macht aus einem Dateinamen aus einer Mail einen ungefährlichen Namen
-/// (keine Pfade, keine Steuerzeichen, keine reservierten Zeichen).
+/// (keine Pfade, keine Steuerzeichen, keine reservierten Zeichen oder Namen).
+///
+/// Unsichtbare Zeichen und Schreibrichtungs-Steuerzeichen werden ersetzt: Mit ihnen lässt
+/// sich z. B. `Rechnung<U+202E>fdp.exe` als „Rechnungexe.pdf“ anzeigen.
 pub fn dateiname_saeubern(name: &str, ersatz: &str) -> String {
     let sauber: String = name
         .chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            c if c.is_control() => '_',
+            c if c.is_control() || unsichtbar(c) => '_',
             c => c,
         })
         .collect();
@@ -43,9 +46,41 @@ pub fn dateiname_saeubern(name: &str, ersatz: &str) -> String {
     let sauber: String = sauber.chars().take(150).collect();
     if sauber.is_empty() {
         ersatz.to_string()
+    } else if windows_reserviert(&sauber) {
+        format!("_{sauber}")
     } else {
         sauber
     }
+}
+
+/// Unsichtbare Formatzeichen (Unicode-Kategorie Cf) und Schreibrichtungs-Steuerzeichen.
+fn unsichtbar(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
+}
+
+/// Unter Windows reservierte Gerätenamen (auch mit Endung, z. B. `NUL.txt`).
+fn windows_reserviert(name: &str) -> bool {
+    let stamm = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_uppercase();
+    matches!(stamm.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stamm.starts_with("COM") || stamm.starts_with("LPT"))
+            && stamm.len() == 4
+            && stamm.as_bytes()[3].is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -78,5 +113,25 @@ mod tests {
         );
         assert_eq!(dateiname_saeubern("...", "anhang"), "anhang");
         assert_eq!(dateiname_saeubern("  Bericht.pdf ", "x"), "Bericht.pdf");
+    }
+
+    #[test]
+    fn schreibrichtung_und_unsichtbare_zeichen_werden_ersetzt() {
+        assert_eq!(
+            dateiname_saeubern("Rechnung\u{202E}fdp.exe", "x"),
+            "Rechnung_fdp.exe"
+        );
+        assert_eq!(
+            dateiname_saeubern("a\u{200B}b\u{2067}.pdf", "x"),
+            "a_b_.pdf"
+        );
+    }
+
+    #[test]
+    fn reservierte_windows_namen_werden_umbenannt() {
+        assert_eq!(dateiname_saeubern("NUL.txt", "x"), "_NUL.txt");
+        assert_eq!(dateiname_saeubern("com1", "x"), "_com1");
+        assert_eq!(dateiname_saeubern("Console.txt", "x"), "Console.txt");
+        assert_eq!(dateiname_saeubern("COM10.txt", "x"), "COM10.txt");
     }
 }

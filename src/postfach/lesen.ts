@@ -49,7 +49,15 @@ function inhaltBereich(
     const laden = el("button", { type: "button", class: "klein" }, "Externe Inhalte laden");
     laden.addEventListener("click", () => aktionen.externLaden());
     const immer = absender
-      ? el("button", { type: "button", class: "klein" }, `Für ${absender} immer erlauben`)
+      ? el(
+          "button",
+          {
+            type: "button",
+            class: "klein",
+            title: "Absenderadressen lassen sich fälschen. Nur für Absender verwenden, denen du vertraust.",
+          },
+          `Für ${absender} immer erlauben`,
+        )
       : null;
     immer?.addEventListener("click", () => aktionen.absenderErlauben(absender));
     teile.push(

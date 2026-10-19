@@ -7,6 +7,10 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+### Behoben
+
+- Mehr Schutz: Nach einer Änderung von Server oder Benutzername muss das Passwort neu eingegeben werden, damit es nicht an einen falschen Server geht. Konto löschen entfernt das Passwort zuverlässig. Verdächtige Links werden auch mit verstecktem oder getarntem Text erkannt. Anhangnamen mit unsichtbaren oder Schreibrichtungs-Zeichen werden entschärft. `mailto:`-Links hängen keine Dateien mehr an. Externe Bilder aus dem eigenen Netz werden nie geladen (#16)
+
 ## 0.1.0 – 2026-10-19
 
 ### Hinzugefügt

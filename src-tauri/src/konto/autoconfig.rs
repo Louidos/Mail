@@ -45,7 +45,7 @@ pub async fn suchen(email: &str) -> Result<Option<Vorschlag>, Fehlermeldung> {
     let client = reqwest::Client::builder()
         .https_only(true)
         .min_tls_version(reqwest::tls::Version::TLS_1_2)
-        .redirect(reqwest::redirect::Policy::limited(3))
+        .redirect(nur_innerhalb(domain.clone()))
         .timeout(Duration::from_secs(10))
         .user_agent("SicherMail")
         .build()
@@ -63,6 +63,27 @@ pub async fn suchen(email: &str) -> Result<Option<Vorschlag>, Fehlermeldung> {
         }
     }
     Ok(None)
+}
+
+/// Weiterleitungen nur innerhalb der Domain der Adresse (höchstens 3), damit die Suche
+/// keine fremden Server anspricht.
+fn nur_innerhalb(domain: String) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |versuch| {
+        let erlaubt = versuch
+            .url()
+            .host_str()
+            .is_some_and(|host| gleiche_domain(host, &domain));
+        if versuch.previous().len() >= 3 || !erlaubt {
+            versuch.stop()
+        } else {
+            versuch.follow()
+        }
+    })
+}
+
+fn gleiche_domain(host: &str, domain: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == domain || host.ends_with(&format!(".{domain}"))
 }
 
 fn gueltige_domain(domain: &str) -> bool {
@@ -186,6 +207,17 @@ mod tests {
     </outgoingServer>
   </emailProvider>
 </clientConfig>"#;
+
+    #[test]
+    fn weiterleitung_nur_innerhalb_der_domain() {
+        assert!(gleiche_domain("autoconfig.example.org", "example.org"));
+        assert!(gleiche_domain("Example.org.", "example.org"));
+        assert!(!gleiche_domain(
+            "example.org.angreifer.example",
+            "example.org"
+        ));
+        assert!(!gleiche_domain("boese-example.org", "example.org"));
+    }
 
     #[test]
     fn beispiel_wird_ausgewertet_und_klartext_ignoriert() {
