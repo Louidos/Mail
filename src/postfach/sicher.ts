@@ -95,6 +95,15 @@ function angezeigteHosts(text: string): string[] {
   return hosts;
 }
 
+/** URL-Kodierung auflösen; fehlerhafte Kodierung (z. B. „%E0“) bleibt unverändert stehen. */
+function dekodiert(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /**
  * Prüft einen Link. Gibt eine Warnung zurück, wenn der angezeigte Text eine andere
  * Adresse vortäuscht als das echte Ziel, oder `null`.
@@ -103,7 +112,7 @@ export function linkPruefen(text: string, href: string): string | null {
   const angezeigt = lesbar(text);
   const ziel = href.trim();
   if (ziel.toLowerCase().startsWith("mailto:")) {
-    const zielAdresse = decodeURIComponent(ziel.slice(7).split("?")[0]).toLowerCase();
+    const zielAdresse = dekodiert(ziel.slice(7).split("?")[0]).toLowerCase();
     if (SIEHT_AUS_WIE_MAIL.test(angezeigt)) {
       const textAdresse = angezeigt.replace(/^mailto:/i, "").toLowerCase();
       if (textAdresse !== zielAdresse) {
