@@ -165,7 +165,6 @@ pub async fn ordner_abgleichen(
 ) -> Result<SyncErgebnis, SyncFehler> {
     let postfach = sitzung.select(ordner).await.map_err(fehler_einordnen)?;
     let uidvalidity = postfach.uid_validity.unwrap_or(0);
-    let uidnext = postfach.uid_next.unwrap_or(0);
     let mut ergebnis = SyncErgebnis {
         auf_server: postfach.exists,
         ..Default::default()
@@ -176,14 +175,7 @@ pub async fn ordner_abgleichen(
         ergebnis.geaendert = vorher.is_some();
     }
     // Leert den Ordner im Zwischenspeicher, falls sich die UIDVALIDITY geändert hat.
-    cache.stand_setzen(
-        konto,
-        ordner,
-        OrdnerStand {
-            uidvalidity,
-            uidnext,
-        },
-    )?;
+    cache.stand_setzen(konto, ordner, OrdnerStand { uidvalidity })?;
 
     let bekannt = cache.uids(konto, ordner)?;
     if postfach.exists == 0 {
