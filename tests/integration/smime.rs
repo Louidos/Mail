@@ -1,10 +1,12 @@
 //! Integrationstests S/MIME (#56): Zertifikate importieren, Mails entschlüsseln und Signaturen
-//! prüfen.
+//! prüfen, verschlüsselt und signiert senden (auch als Rundlauf gegen den Test-Mailserver).
 //!
 //! Die Test-PKI in `tests/integration/daten/smime/` wurde eigens dafür erzeugt (siehe
 //! LIESMICH.md dort). Testmails baut dieser Test selbst mit OpenSSL; nur Mails mit unsicheren
 //! Verfahren (RC2, DES, MD5) liegen fertig bei, weil die mitgelieferte OpenSSL sie nicht mehr
 //! erzeugen kann.
+
+mod gemeinsam;
 
 use std::sync::Arc;
 
@@ -19,6 +21,8 @@ use sichermail_lib::pgp::lesen::{Signatur, Verfahren, Verschluesselung};
 use sichermail_lib::pgp::speicher::SchluesselDb;
 use sichermail_lib::smime::lesen::{CBC_HINWEIS, SPERRSTATUS_HINWEIS};
 use sichermail_lib::smime::{zertifikat, SmimeDienst};
+use sichermail_lib::smtp::entwurf::Entwurf;
+use sichermail_lib::smtp::nachricht::{self, Schutz};
 
 const PASSWORT: &str = "test-passwort";
 
@@ -534,4 +538,350 @@ fn mails_von_der_openssl_kommandozeile() {
     );
     assert_eq!(ergebnis.status.signatur, Signatur::Gueltig);
     assert!(text(&ergebnis.roh.unwrap()).contains("Geheimer Testinhalt"));
+}
+
+// --- Senden -------------------------------------------------------------------------------
+
+/// Konto „Anna“ ohne Server (für das Bauen der Mail).
+fn anna_konto() -> sichermail_lib::konto::Konto {
+    let server = sichermail_lib::konto::ServerEinstellung {
+        host: "mail.example.org".into(),
+        port: 465,
+        verschluesselung: sichermail_lib::konto::Verschluesselung::Tls,
+        zertifikat: None,
+    };
+    sichermail_lib::konto::Konto {
+        id: "k1".into(),
+        name: "Anna Test".into(),
+        email: "anna@example.org".into(),
+        benutzername: "anna".into(),
+        imap: server.clone(),
+        smtp: server,
+        gesendet_ablegen: true,
+        absender_kennung: String::new(),
+    }
+}
+
+/// Dienst für jemanden mit eigenem Zertifikat (`name.p12`) und übernommener Test-Wurzel.
+fn dienst_fuer(ordner: &std::path::Path, name: &str) -> SmimeDienst {
+    let d = dienst(ordner, Arc::new(SpeicherSchluesselbund::default()));
+    d.eigenes_importieren(
+        "k1",
+        &format!("{name}@example.org"),
+        &daten(&format!("{name}.p12")),
+        PASSWORT,
+    )
+    .unwrap();
+    wurzel_uebernehmen(&d);
+    d
+}
+
+fn smime_entwurf(an: &str, bcc: &str, verschluesseln: bool, signieren: bool) -> Entwurf {
+    Entwurf {
+        konto: "k1".into(),
+        an: an.into(),
+        bcc: bcc.into(),
+        betreff: "Vertraulich".into(),
+        text: "Hallo Bea,\n\ndas ist vertraulich.\n".into(),
+        verschluesseln,
+        signieren,
+        verfahren: Verfahren::Smime,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn ohne_gueltiges_empfaenger_zertifikat_wird_nicht_gesendet() {
+    let ordner = tempfile::tempdir().unwrap();
+    let d = dienst_fuer_anna(ordner.path());
+    let adressen = vec![
+        "bea@example.org".to_string(),
+        "carl@example.org".to_string(),
+    ];
+
+    // Kein Zertifikat für Bea und Carl
+    let pruefung = d.versand_pruefen("k1", &adressen, true, false).unwrap();
+    assert_eq!(pruefung.fehlende_empfaenger, adressen);
+    let fehler = d
+        .versand_vorbereiten("k1", &adressen, true, false)
+        .err()
+        .unwrap();
+    assert_eq!(fehler.art, "smime_zertifikat_fehlt");
+    assert!(
+        fehler.meldung.contains("carl@example.org"),
+        "{}",
+        fehler.meldung
+    );
+
+    // Abgelaufenes Zertifikat zählt nicht.
+    d.fremde_importieren(&daten("bea-abgelaufen.pem")).unwrap();
+    let pruefung = d.versand_pruefen("k1", &adressen, true, false).unwrap();
+    assert!(pruefung
+        .fehlende_empfaenger
+        .contains(&"bea@example.org".to_string()));
+    // Von unbekannter Stelle auch nicht.
+    d.fremde_importieren(&daten("bea-fremd.pem")).unwrap();
+    let pruefung = d.versand_pruefen("k1", &adressen, true, false).unwrap();
+    assert!(pruefung
+        .fehlende_empfaenger
+        .contains(&"bea@example.org".to_string()));
+    // Gültig: Nur noch Carl fehlt.
+    d.fremde_importieren(&daten("bea.pem")).unwrap();
+    let pruefung = d.versand_pruefen("k1", &adressen, true, false).unwrap();
+    assert_eq!(pruefung.fehlende_empfaenger, vec!["carl@example.org"]);
+
+    // Ohne eigenes Zertifikat geht gar nichts.
+    let pruefung = d
+        .versand_pruefen("k2", &adressen[..1], false, true)
+        .unwrap();
+    assert!(pruefung.eigener_fehlt);
+}
+
+#[test]
+fn signieren_braucht_die_passphrase_nach_neustart() {
+    let ordner = tempfile::tempdir().unwrap();
+    let bund: Arc<dyn Schluesselbund> = Arc::new(SpeicherSchluesselbund::default());
+    let d = dienst(ordner.path(), bund.clone());
+    let info = d
+        .eigenes_importieren("k1", "anna@example.org", &daten("anna.p12"), PASSWORT)
+        .unwrap();
+    drop(d);
+    let d = dienst(ordner.path(), bund);
+    let adressen = vec!["bea@example.org".to_string()];
+    let pruefung = d.versand_pruefen("k1", &adressen, false, true).unwrap();
+    assert_eq!(pruefung.passphrase_fuer, Some(info.fingerabdruck.clone()));
+    assert_eq!(
+        d.versand_vorbereiten("k1", &adressen, false, true)
+            .err()
+            .unwrap()
+            .art,
+        "smime_passphrase"
+    );
+    d.entsperren(&info.fingerabdruck, PASSWORT).unwrap();
+    assert!(d.versand_vorbereiten("k1", &adressen, false, true).is_ok());
+}
+
+#[test]
+fn verschluesselt_und_signiert_mit_bcc() {
+    let ordner = tempfile::tempdir().unwrap();
+    let anna = dienst_fuer_anna(ordner.path());
+    anna.fremde_importieren(&daten("bea.pem")).unwrap();
+    anna.fremde_importieren(&daten("eve.pem")).unwrap();
+    let entwurf = smime_entwurf("Bea Test <bea@example.org>", "eve@example.org", true, true);
+    let adressen = nachricht::alle_empfaenger(&entwurf).unwrap();
+    let versand = anna
+        .versand_vorbereiten("k1", &adressen, true, true)
+        .unwrap();
+    let gebaut = nachricht::bauen_geschuetzt(
+        &anna_konto(),
+        &entwurf,
+        &[nachricht::AnhangDaten {
+            name: "plan.txt".into(),
+            typ: "text/plain".into(),
+            daten: b"Geheimer Plan".to_vec(),
+        }],
+        Some(Schutz::Smime(&versand)),
+    )
+    .unwrap();
+    assert_eq!(
+        gebaut.sendungen.len(),
+        2,
+        "An und eine eigene Sendung für Bcc"
+    );
+    let haupt = &gebaut.sendungen[0].daten;
+    let fuer_bcc = &gebaut.sendungen[1].daten;
+    for roh in [haupt, fuer_bcc] {
+        let t = text(roh);
+        assert!(t.contains("application/pkcs7-mime"), "{t}");
+        assert!(t.contains("smime-type=enveloped-data"));
+        assert!(!t.contains("Geheimer Plan") && !t.contains("vertraulich"));
+        // Bcc steht in keiner versendeten Nachricht.
+        assert!(!t.contains("eve@example.org"));
+    }
+
+    let bea_ordner = tempfile::tempdir().unwrap();
+    let bea = dienst_fuer(bea_ordner.path(), "bea");
+    let eve_ordner = tempfile::tempdir().unwrap();
+    let eve = dienst_fuer(eve_ordner.path(), "eve");
+
+    // Bea liest die Hauptnachricht: entschlüsselt, gültig signiert von Anna, mit Anhang.
+    let ergebnis = bea.verarbeiten(haupt);
+    assert_eq!(
+        ergebnis.status.verschluesselung,
+        Verschluesselung::Entschluesselt,
+        "{:?}",
+        ergebnis.status.meldung
+    );
+    assert_eq!(ergebnis.status.signatur, Signatur::Gueltig);
+    assert!(ergebnis.status.hinweise.iter().all(|h| h != CBC_HINWEIS));
+    let klartext = text(&ergebnis.roh.unwrap());
+    assert!(klartext.contains("plan.txt"));
+    assert!(klartext.contains("das ist vertraulich"));
+
+    // Die Hauptnachricht ist nicht an Eve verschlüsselt, die Bcc-Nachricht nur an Eve.
+    assert_eq!(
+        eve.verarbeiten(haupt).status.verschluesselung,
+        Verschluesselung::NichtEntschluesselt
+    );
+    let fuer_eve = eve.verarbeiten(fuer_bcc);
+    assert_eq!(
+        fuer_eve.status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+    assert_eq!(fuer_eve.status.signatur, Signatur::Gueltig);
+    assert_eq!(
+        bea.verarbeiten(fuer_bcc).status.verschluesselung,
+        Verschluesselung::NichtEntschluesselt
+    );
+    assert_eq!(
+        anna.verarbeiten(fuer_bcc).status.verschluesselung,
+        Verschluesselung::NichtEntschluesselt
+    );
+
+    // „Gesendet“ ist für Anna lesbar und nennt Bcc.
+    assert!(text(&gebaut.fuer_gesendet).contains("eve@example.org"));
+    assert_eq!(
+        anna.verarbeiten(&gebaut.fuer_gesendet)
+            .status
+            .verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+}
+
+#[test]
+fn nur_signiert_ist_gueltig() {
+    let ordner = tempfile::tempdir().unwrap();
+    let anna = dienst_fuer_anna(ordner.path());
+    let entwurf = smime_entwurf("bea@example.org", "", false, true);
+    let versand = anna
+        .versand_vorbereiten("k1", &["bea@example.org".into()], false, true)
+        .unwrap();
+    let gebaut =
+        nachricht::bauen_geschuetzt(&anna_konto(), &entwurf, &[], Some(Schutz::Smime(&versand)))
+            .unwrap();
+    let roh = &gebaut.sendungen[0].daten;
+    let t = text(roh);
+    assert!(t.contains("multipart/signed"), "{t}");
+    assert!(t.contains("application/pkcs7-signature"));
+    assert!(t.contains("sha-256"));
+    assert!(t.contains("das ist vertraulich"));
+
+    let bea_ordner = tempfile::tempdir().unwrap();
+    let bea = dienst_fuer(bea_ordner.path(), "bea");
+    let ergebnis = bea.verarbeiten(roh);
+    assert_eq!(ergebnis.status.signatur, Signatur::Gueltig);
+    assert_eq!(ergebnis.status.verschluesselung, Verschluesselung::Keine);
+    assert_eq!(
+        ergebnis.status.signierer.as_deref(),
+        Some("Anna Test <anna@example.org>")
+    );
+}
+
+#[tokio::test]
+#[ignore = "braucht den Test-Mailserver (scripts/test-mailserver.sh start)"]
+async fn rundlauf_senden_empfangen_entschluesseln() {
+    use futures_util::TryStreamExt;
+    use gemeinsam::{direkte_sitzung, eingabe, zustellen};
+    use sichermail_lib::imap::cache::SpeicherCache;
+    use sichermail_lib::imap::dienst::ImapDienst;
+    use sichermail_lib::smtp::dienst::SendeDienst;
+
+    // Postfächer anlegen (GreenMail legt sie beim ersten Empfang an).
+    for adresse in ["anna@example.org", "bea@example.org", "eve@example.org"] {
+        zustellen(adresse, &["Willkommen"]).await;
+    }
+    // Konto mit der Adresse aus Annas Zertifikat
+    let konto_ordner = tempfile::tempdir().unwrap();
+    let konten = Arc::new(sichermail_lib::konto::KontoVerwaltung::neu(
+        konto_ordner.path(),
+        Arc::new(SpeicherSchluesselbund::default()),
+    ));
+    let mut konto_eingabe = eingabe("anna@example.org", "anna@example.org");
+    konto_eingabe.name = "Anna Test".into();
+    konto_eingabe.email = "anna@example.org".into();
+    let konto = konten.speichern(&konto_eingabe).await.unwrap();
+    let schluessel_ordner = tempfile::tempdir().unwrap();
+    let anna = Arc::new(dienst(
+        schluessel_ordner.path(),
+        Arc::new(SpeicherSchluesselbund::default()),
+    ));
+    anna.eigenes_importieren(&konto.id, "anna@example.org", &daten("anna.p12"), PASSWORT)
+        .unwrap();
+    wurzel_uebernehmen(&anna);
+    anna.fremde_importieren(&daten("bea.pem")).unwrap();
+    anna.fremde_importieren(&daten("eve.pem")).unwrap();
+
+    let imap = Arc::new(ImapDienst::neu(
+        konten.clone(),
+        Arc::new(SpeicherCache::default()),
+    ));
+    let senden = SendeDienst::neu(konten, imap).mit_smime(anna.clone());
+    let betreff = format!("S/MIME-Rundlauf {}", uuid::Uuid::new_v4().simple());
+
+    // Fehlt ein Zertifikat, wird nichts gesendet.
+    let mut entwurf = smime_entwurf("bea@example.org", "carl@example.org", true, true);
+    entwurf.konto = konto.id.clone();
+    entwurf.betreff = betreff.clone();
+    let fehler = senden.senden(&entwurf).await.unwrap_err();
+    assert!(
+        fehler.meldung.contains("carl@example.org"),
+        "{}",
+        fehler.meldung
+    );
+
+    entwurf.bcc = "eve@example.org".into();
+    entwurf.id = None;
+    let ergebnis = senden.senden(&entwurf).await.unwrap();
+    assert!(ergebnis.abgelegt, "{ergebnis:?}");
+
+    async fn mit_betreff(adresse: &str, ordner: &str, betreff: &str) -> Vec<Vec<u8>> {
+        let mut s = direkte_sitzung(adresse).await;
+        s.examine(ordner).await.unwrap();
+        let alle: Vec<async_imap::types::Fetch> = s
+            .fetch("1:*", "BODY.PEEK[]")
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let _ = s.logout().await;
+        alle.iter()
+            .filter_map(|f| f.body().map(|b| b.to_vec()))
+            .filter(|b| String::from_utf8_lossy(b).contains(betreff))
+            .collect()
+    }
+
+    // Bea: genau eine Mail (die fehlgeschlagene ging an niemanden), entschlüsselt und gültig.
+    let bei_bea = mit_betreff("bea@example.org", "INBOX", &betreff).await;
+    assert_eq!(bei_bea.len(), 1);
+    let bea_ordner = tempfile::tempdir().unwrap();
+    let bea = dienst_fuer(bea_ordner.path(), "bea");
+    let ergebnis = bea.verarbeiten(&bei_bea[0]);
+    assert_eq!(
+        ergebnis.status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+    assert_eq!(ergebnis.status.signatur, Signatur::Gueltig);
+    assert!(text(&ergebnis.roh.unwrap()).contains("das ist vertraulich"));
+    assert!(!text(&bei_bea[0]).contains("eve@example.org"));
+
+    // Eve (Bcc) bekam eine eigene Nachricht.
+    let bei_eve = mit_betreff("eve@example.org", "INBOX", &betreff).await;
+    assert_eq!(bei_eve.len(), 1);
+    let eve_ordner = tempfile::tempdir().unwrap();
+    let eve = dienst_fuer(eve_ordner.path(), "eve");
+    assert_eq!(
+        eve.verarbeiten(&bei_eve[0]).status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+
+    // Die Kopie in „Gesendet“ ist für Anna lesbar.
+    let gesendet = mit_betreff("anna@example.org", "Sent", &betreff).await;
+    assert_eq!(gesendet.len(), 1);
+    let kopie = anna.verarbeiten(&gesendet[0]);
+    assert_eq!(
+        kopie.status.verschluesselung,
+        Verschluesselung::Entschluesselt
+    );
+    assert!(text(&kopie.roh.unwrap()).contains("das ist vertraulich"));
 }

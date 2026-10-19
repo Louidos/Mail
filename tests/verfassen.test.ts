@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AufbereiteteMail, Konto } from "../src/api";
+import type { AufbereiteteMail, Entwurf, Konto } from "../src/api";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
@@ -144,9 +144,10 @@ describe("Verfassen-Fenster", () => {
     dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
     await warten();
     await warten();
-    const befehle = invoke.mock.calls.map((c) => c[0]);
-    expect(befehle).toEqual(["entwurf_speichern", "mail_senden"]);
-    expect(invoke.mock.calls[1][1].entwurf).toMatchObject({ id: "e1", an: "bea@example.org", text: "Text" });
+    // Beim Öffnen werden nur die Übersichten der Schlüssel und Zertifikate gelesen.
+    const aufrufe = invoke.mock.calls.filter((c) => !String(c[0]).endsWith("_uebersicht"));
+    expect(aufrufe.map((c) => c[0])).toEqual(["entwurf_speichern", "mail_senden"]);
+    expect(aufrufe[1][1].entwurf).toMatchObject({ id: "e1", an: "bea@example.org", text: "Text" });
     expect(gesendet).toHaveBeenCalledWith({ abgelegt: true, hinweis: null });
     expect(document.body.contains(dialog)).toBe(false);
   });
@@ -173,7 +174,8 @@ describe("Verfassen-Fenster", () => {
     const dialog = verfassenOeffnen({ konten: [konto], entwurf: leererEntwurf("k1") });
     dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
     await warten();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith("entwurf_speichern", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("mail_senden", expect.anything());
     expect(dialog.querySelector(".status")?.textContent).toContain("Empfänger");
   });
 
@@ -269,6 +271,95 @@ describe("Verfassen-Fenster", () => {
     await warten();
     expect(invoke).not.toHaveBeenCalledWith("mail_senden", expect.anything());
     expect(invoke).not.toHaveBeenCalledWith("pgp_entsperren", expect.anything());
+  });
+
+  describe("S/MIME", () => {
+    const zertifikat = { fingerabdruck: "CCCC", name: "Anna", adressen: ["anna@example.org"], aussteller: "Test", gueltig_ab: 0, gueltig_bis: 4_000_000_000, abgelaufen: false };
+    const pgpSchluessel = { fingerabdruck: "AAAA", benutzer_ids: [], adressen: [], erstellt: 0, kann_verschluesseln: true, konto: "k1", geschuetzt: true, entsperrt: false };
+
+    function backend(pgp: boolean, smime: boolean, pruefung = { fehlende_empfaenger: [] as string[], eigener_fehlt: false, passphrase_fuer: null as string | null }) {
+      invoke.mockImplementation((befehl: string, args: { entwurf?: object }) => {
+        if (befehl === "pgp_uebersicht") return Promise.resolve({ eigene: pgp ? [pgpSchluessel] : [], fremde: [] });
+        if (befehl === "smime_uebersicht")
+          return Promise.resolve({ eigene: smime ? [{ ...zertifikat, konto: "k1", entsperrt: false }] : [], fremde: [], wurzeln: [] });
+        if (befehl === "pgp_versand_pruefen") return Promise.resolve(pruefung);
+        if (befehl === "entwurf_speichern") return Promise.resolve({ ...args.entwurf, id: "e1" });
+        if (befehl === "mail_senden") return Promise.resolve({ abgelegt: true, hinweis: null });
+        return Promise.resolve(undefined);
+      });
+    }
+
+    const oeffnen = async (entwurf: Partial<Entwurf> = {}) => {
+      const dialog = verfassenOeffnen({ konten: [konto], entwurf: { ...leererEntwurf("k1"), an: "bea@example.org", betreff: "Hallo", ...entwurf } });
+      await warten();
+      await warten();
+      return dialog;
+    };
+
+    it("zeigt die Verfahrenswahl nur, wenn OpenPGP und S/MIME eingerichtet sind, OpenPGP voreingestellt", async () => {
+      backend(true, true);
+      const dialog = await oeffnen();
+      const wahl = dialog.querySelector("[name=verfahren]") as HTMLSelectElement;
+      expect((wahl.parentElement as HTMLElement).hidden).toBe(false);
+      expect(wahl.value).toBe("openpgp");
+      expect(dialog.textContent).toContain("Verschlüsseln (OpenPGP)");
+      wahl.value = "smime";
+      wahl.dispatchEvent(new Event("change"));
+      expect(dialog.textContent).toContain("Verschlüsseln (S/MIME)");
+      expect(dialog.textContent).toContain("Signieren (S/MIME)");
+    });
+
+    it("nimmt S/MIME, wenn nur ein Zertifikat da ist, und versteckt die Wahl", async () => {
+      backend(false, true);
+      const dialog = await oeffnen();
+      const wahl = dialog.querySelector("[name=verfahren]") as HTMLSelectElement;
+      expect((wahl.parentElement as HTMLElement).hidden).toBe(true);
+      expect(dialog.textContent).toContain("Verschlüsseln (S/MIME)");
+      backend(true, false);
+      const zweiter = await oeffnen();
+      expect(zweiter.textContent).toContain("Verschlüsseln (OpenPGP)");
+    });
+
+    it("antwortet auf S/MIME-Mails mit S/MIME", async () => {
+      backend(true, true);
+      const dialog = await oeffnen({ verfahren: "smime", verschluesseln: true });
+      expect((dialog.querySelector("[name=verfahren]") as HTMLSelectElement).value).toBe("smime");
+    });
+
+    it("warnt bei fehlendem S/MIME-Zertifikat mit dem Namen und sendet nicht", async () => {
+      backend(false, true, { fehlende_empfaenger: ["bea@example.org"], eigener_fehlt: false, passphrase_fuer: null });
+      const dialog = await oeffnen();
+      const schalter = dialog.querySelector("[name=verschluesseln]") as HTMLInputElement;
+      schalter.checked = true;
+      schalter.dispatchEvent(new Event("change"));
+      await warten();
+      await warten();
+      expect(dialog.querySelector(".pgp-hinweis")?.textContent).toContain("fehlt ein gültiges S/MIME-Zertifikat: bea@example.org");
+      dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+      await warten();
+      await warten();
+      expect(invoke).toHaveBeenCalledWith("pgp_versand_pruefen", { entwurf: expect.objectContaining({ verfahren: "smime", verschluesseln: true }) });
+      expect(invoke).not.toHaveBeenCalledWith("mail_senden", expect.anything());
+      expect(dialog.querySelector(".status")?.textContent).toContain("Nicht gesendet");
+    });
+
+    it("entsperrt zum Signieren das S/MIME-Zertifikat", async () => {
+      backend(false, true, { fehlende_empfaenger: [], eigener_fehlt: false, passphrase_fuer: "CCCC" });
+      const dialog = await oeffnen({ signieren: true });
+      dialog.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+      await warten();
+      await warten();
+      const abfrage = document.querySelector("dialog.passphrase") as HTMLDialogElement;
+      expect(abfrage.textContent).toContain("S/MIME-Zertifikats");
+      (abfrage.querySelector("input[type=password]") as HTMLInputElement).value = "test-passwort";
+      abfrage.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+      await warten();
+      await warten();
+      await warten();
+      expect(invoke).toHaveBeenCalledWith("smime_entsperren", { fingerabdruck: "CCCC", passphrase: "test-passwort" });
+      expect(invoke).not.toHaveBeenCalledWith("pgp_entsperren", expect.anything());
+      expect(invoke).toHaveBeenCalledWith("mail_senden", { entwurf: expect.objectContaining({ verfahren: "smime", signieren: true }) });
+    });
   });
 
   it("schliesst nicht mit Escape, damit kein Text verloren geht", () => {

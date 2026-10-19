@@ -63,8 +63,8 @@ pub enum Signatur {
     Gueltig,
 }
 
-/// Verfahren der Ende-zu-Ende-Verschlüsselung.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+/// Verfahren der Ende-zu-Ende-Verschlüsselung (auch die Wahl beim Senden).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Verfahren {
     #[default]

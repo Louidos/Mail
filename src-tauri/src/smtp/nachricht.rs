@@ -1,9 +1,9 @@
-//! Aus einem Entwurf eine Mail (RFC 5322) bauen – auf Wunsch mit OpenPGP verschlüsselt und/oder
-//! signiert (PGP/MIME nach RFC 3156).
+//! Aus einem Entwurf eine Mail (RFC 5322) bauen – auf Wunsch verschlüsselt und/oder signiert, mit
+//! OpenPGP (PGP/MIME nach RFC 3156) oder S/MIME (RFC 8551).
 //!
 //! Bcc bei Verschlüsselung: Jeder Bcc-Empfänger bekommt eine eigene Nachricht, die nur an seinen
-//! Schlüssel verschlüsselt ist. So stehen in der Nachricht für An/Cc keine Schlüssel-IDs der
-//! Bcc-Empfänger, und Bcc-Empfänger sehen nicht, wer sonst Bcc bekam.
+//! Schlüssel bzw. sein Zertifikat verschlüsselt ist. So stehen in der Nachricht für An/Cc keine
+//! Schlüssel-IDs der Bcc-Empfänger, und Bcc-Empfänger sehen nicht, wer sonst Bcc bekam.
 
 use lettre::address::Envelope;
 use lettre::message::header::{ContentDisposition, ContentType};
@@ -15,6 +15,7 @@ use crate::fehler::Fehlermeldung;
 use crate::konto::Konto;
 use crate::pgp::schreiben;
 use crate::pgp::VersandSchluessel;
+use crate::smime::schreiben as smime_schreiben;
 
 /// Inhalt eines Anhangs zum Versand.
 #[derive(Debug, Clone)]
@@ -125,6 +126,137 @@ fn signiert_teil(inhalt: Teil, signatur: String) -> Result<MultiPart, Fehlermeld
             .header(ContentDisposition::attachment("signature.asc"))
             .body(signatur),
     ))
+}
+
+/// `application/pkcs7-mime` mit verschlüsseltem Inhalt (RFC 8551, Abschnitt 3.3).
+fn smime_verschluesselt_teil(der: Vec<u8>) -> Result<SinglePart, Fehlermeldung> {
+    let typ =
+        ContentType::parse("application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"")
+            .map_err(|_| Fehlermeldung::neu("intern", "Die Mail konnte nicht erstellt werden."))?;
+    Ok(SinglePart::builder()
+        .header(typ)
+        .header(ContentDisposition::attachment("smime.p7m"))
+        .body(der))
+}
+
+/// `multipart/signed` mit abgetrennter S/MIME-Signatur (RFC 8551, Abschnitt 3.5.3).
+fn smime_signiert_teil(inhalt: Teil, signatur: Vec<u8>) -> Result<MultiPart, Fehlermeldung> {
+    let typ = ContentType::parse("application/pkcs7-signature; name=\"smime.p7s\"")
+        .map_err(|_| Fehlermeldung::neu("intern", "Die Mail konnte nicht erstellt werden."))?;
+    let aussen = MultiPart::signed(
+        "application/pkcs7-signature".into(),
+        smime_schreiben::MICALG.into(),
+    );
+    Ok(inhalt.in_multipart(aussen).singlepart(
+        SinglePart::builder()
+            .header(typ)
+            .header(ContentDisposition::attachment("smime.p7s"))
+            .body(signatur),
+    ))
+}
+
+/// Ende-zu-Ende-Schutz beim Versand.
+pub enum Schutz<'a> {
+    Pgp(&'a VersandSchluessel),
+    Smime(&'a smime_schreiben::Versand),
+}
+
+impl Schutz<'_> {
+    fn verschluesselt(&self) -> bool {
+        match self {
+            Schutz::Pgp(p) => p.empfaenger.is_some(),
+            Schutz::Smime(s) => s.empfaenger.is_some(),
+        }
+    }
+
+    /// Nur signieren: `multipart/signed`.
+    fn signiert(&self, inhalt: Teil) -> Result<Teil, Fehlermeldung> {
+        let fehlt = || Fehlermeldung::neu("intern", "Kein Schlüssel zum Signieren.");
+        Ok(Teil::Mehrteilig(match self {
+            Schutz::Pgp(p) => {
+                let signierer = p.signierer.as_ref().ok_or_else(fehlt)?;
+                let signatur = schreiben::signieren(&signierte_daten(&inhalt), signierer)?;
+                signiert_teil(inhalt, signatur)?
+            }
+            Schutz::Smime(s) => {
+                let signierer = s.signierer.as_ref().ok_or_else(fehlt)?;
+                let signatur = smime_schreiben::signieren(&signierte_daten(&inhalt), signierer)?;
+                smime_signiert_teil(inhalt, signatur)?
+            }
+        }))
+    }
+
+    /// Verschlüsselt den Inhalt an `empfaenger` (und, mit `mit_eigenem`, an den eigenen
+    /// Schlüssel bzw. das eigene Zertifikat), signiert innerhalb der Verschlüsselung.
+    fn verschluesselt_an(
+        &self,
+        inhalt: &Teil,
+        empfaenger: &[&Mailbox],
+        mit_eigenem: bool,
+    ) -> Result<Teil, Fehlermeldung> {
+        match self {
+            Schutz::Pgp(p) => {
+                let schluessel = p
+                    .empfaenger
+                    .as_ref()
+                    .ok_or_else(|| Fehlermeldung::neu("intern", "Keine Empfängerschlüssel."))?;
+                let mut offen: Vec<&pgp::composed::SignedPublicKey> = Vec::new();
+                if mit_eigenem {
+                    offen.push(&p.eigener);
+                }
+                for m in empfaenger {
+                    let k = schluessel
+                        .get(&m.email.to_string().to_lowercase())
+                        .ok_or_else(|| {
+                            Fehlermeldung::neu(
+                                "pgp_schluessel_fehlt",
+                                format!("Für {} fehlt ein öffentlicher Schlüssel.", m.email),
+                            )
+                        })?;
+                    // Jeden Schlüssel nur einmal (z. B. bei einer Mail an sich selbst).
+                    if !offen.iter().any(|o| o.primary_key == k.primary_key) {
+                        offen.push(k);
+                    }
+                }
+                let armored = schreiben::verschluesseln(
+                    &inhalt.formatted(),
+                    &offen,
+                    p.signierer.as_ref(),
+                    false,
+                )?;
+                Ok(Teil::Mehrteilig(verschluesselt_teil(armored)?))
+            }
+            Schutz::Smime(s) => {
+                let zertifikate = s
+                    .empfaenger
+                    .as_ref()
+                    .ok_or_else(|| Fehlermeldung::neu("intern", "Keine Empfängerzertifikate."))?;
+                let mut an: Vec<&openssl::x509::X509> = Vec::new();
+                if mit_eigenem {
+                    an.push(&s.eigenes);
+                }
+                for m in empfaenger {
+                    an.push(
+                        zertifikate
+                            .get(&m.email.to_string().to_lowercase())
+                            .ok_or_else(|| {
+                                Fehlermeldung::neu(
+                                    "smime_zertifikat_fehlt",
+                                    format!("Für {} fehlt ein S/MIME-Zertifikat.", m.email),
+                                )
+                            })?,
+                    );
+                }
+                // Erst signieren, dann verschlüsseln (RFC 8551, Abschnitt 3.7).
+                let innen = match &s.signierer {
+                    Some(_) => self.signiert(inhalt.clone())?,
+                    None => inhalt.clone(),
+                };
+                let der = smime_schreiben::verschluesseln(&innen.formatted(), &an)?;
+                Ok(Teil::Einzeln(smime_verschluesselt_teil(der)?))
+            }
+        }
+    }
 }
 
 /// Signiert wird die Entität genau so, wie sie zwischen den Begrenzern steht: ohne das letzte
@@ -266,6 +398,16 @@ pub fn bauen_mit(
     anhaenge: &[AnhangDaten],
     pgp: Option<&VersandSchluessel>,
 ) -> Result<GebauteNachricht, Fehlermeldung> {
+    bauen_geschuetzt(konto, entwurf, anhaenge, pgp.map(Schutz::Pgp))
+}
+
+/// Baut die Mail, auf Wunsch mit OpenPGP oder S/MIME verschlüsselt und/oder signiert.
+pub fn bauen_geschuetzt(
+    konto: &Konto,
+    entwurf: &Entwurf,
+    anhaenge: &[AnhangDaten],
+    schutz: Option<Schutz>,
+) -> Result<GebauteNachricht, Fehlermeldung> {
     let an = empfaenger_lesen("An", &entwurf.an)?;
     let cc = empfaenger_lesen("Cc", &entwurf.cc)?;
     let bcc = empfaenger_lesen("Bcc", &entwurf.bcc)?;
@@ -335,86 +477,51 @@ pub fn bauen_mit(
     };
     let inhalt = inhalt(entwurf, anhaenge)?;
 
-    let Some(pgp) = pgp else {
-        // Ohne OpenPGP: eine Sendung an alle, Bcc nur im Umschlag.
-        let zum_senden = mit_teil(kopf(true), inhalt.clone())?;
-        let fuer_gesendet = mit_teil(kopf(true).keep_bcc(), inhalt)?;
-        return Ok(GebauteNachricht {
-            sendungen: vec![Sendung {
-                umschlag: zum_senden.envelope().clone(),
-                daten: zum_senden.formatted(),
-            }],
-            fuer_gesendet: fuer_gesendet.formatted(),
-            message_id,
-        });
-    };
-
-    let Some(schluessel) = &pgp.empfaenger else {
-        // Nur signieren: eine Sendung an alle, Bcc nur im Umschlag.
-        let signierer = pgp
-            .signierer
-            .as_ref()
-            .ok_or_else(|| Fehlermeldung::neu("intern", "Kein Schlüssel zum Signieren."))?;
-        let signatur = schreiben::signieren(&signierte_daten(&inhalt), signierer)?;
-        let teil = Teil::Mehrteilig(signiert_teil(inhalt, signatur)?);
+    let einfach = |teil: Teil| -> Result<GebauteNachricht, Fehlermeldung> {
+        // Eine Sendung an alle, Bcc nur im Umschlag.
         let zum_senden = mit_teil(kopf(true), teil.clone())?;
         let fuer_gesendet = mit_teil(kopf(true).keep_bcc(), teil)?;
-        return Ok(GebauteNachricht {
+        Ok(GebauteNachricht {
             sendungen: vec![Sendung {
                 umschlag: zum_senden.envelope().clone(),
                 daten: zum_senden.formatted(),
             }],
             fuer_gesendet: fuer_gesendet.formatted(),
-            message_id,
-        });
+            message_id: message_id.clone(),
+        })
     };
 
-    // Verschlüsseln (optional mit Signatur innerhalb der Verschlüsselung).
-    let schluessel_von = |m: &Mailbox| {
-        schluessel
-            .get(&m.email.to_string().to_lowercase())
-            .ok_or_else(|| {
-                Fehlermeldung::neu(
-                    "pgp_schluessel_fehlt",
-                    format!("Für {} fehlt ein öffentlicher Schlüssel.", m.email),
-                )
-            })
+    let Some(schutz) = schutz else {
+        return einfach(inhalt);
     };
-    let daten = inhalt.formatted();
-    let signierer = pgp.signierer.as_ref();
-
-    // An und Cc und immer auch der eigene Schlüssel (damit „Gesendet“ lesbar bleibt).
-    let mut offen: Vec<&pgp::composed::SignedPublicKey> = vec![&pgp.eigener];
-    for m in an.iter().chain(cc.iter()) {
-        let k = schluessel_von(m)?;
-        // Jeden Schlüssel nur einmal (z. B. bei einer Mail an sich selbst).
-        if !offen.iter().any(|o| o.primary_key == k.primary_key) {
-            offen.push(k);
-        }
+    if !schutz.verschluesselt() {
+        // Nur signieren
+        return einfach(schutz.signiert(inhalt)?);
     }
-    let haupt = verschluesselt_teil(schreiben::verschluesseln(&daten, &offen, signierer, false)?)?;
+
+    // Verschlüsseln (optional mit Signatur innerhalb der Verschlüsselung): An und Cc und immer
+    // auch an sich selbst (damit „Gesendet“ lesbar bleibt).
+    let offen: Vec<&Mailbox> = an.iter().chain(cc.iter()).collect();
+    let haupt = schutz.verschluesselt_an(&inhalt, &offen, true)?;
     let mut sendungen = Vec::new();
-    if !an.is_empty() || !cc.is_empty() {
-        let zum_senden = mit_teil(kopf(false), Teil::Mehrteilig(haupt.clone()))?;
+    if !offen.is_empty() {
+        let zum_senden = mit_teil(kopf(false), haupt.clone())?;
         sendungen.push(Sendung {
             umschlag: zum_senden.envelope().clone(),
             daten: zum_senden.formatted(),
         });
     }
     for m in &bcc {
-        let armored = schreiben::verschluesseln(&daten, &[schluessel_von(m)?], signierer, false)?;
+        let teil = schutz.verschluesselt_an(&inhalt, &[m], false)?;
         let umschlag = Envelope::new(Some(absender.email.clone()), vec![m.email.clone()])
             .map_err(|_| Fehlermeldung::neu("eingabe", "Ungültige Bcc-Adresse."))?;
-        let nachricht = mit_teil(
-            kopf(false).envelope(umschlag.clone()),
-            Teil::Mehrteilig(verschluesselt_teil(armored)?),
-        )?;
+        let nachricht = mit_teil(kopf(false).envelope(umschlag.clone()), teil)?;
         sendungen.push(Sendung {
             umschlag,
             daten: nachricht.formatted(),
         });
     }
-    let fuer_gesendet = mit_teil(kopf(true).keep_bcc(), Teil::Mehrteilig(haupt))?;
+    let fuer_gesendet = mit_teil(kopf(true).keep_bcc(), haupt)?;
     Ok(GebauteNachricht {
         sendungen,
         fuer_gesendet: fuer_gesendet.formatted(),

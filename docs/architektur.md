@@ -220,8 +220,15 @@ Aufbau:
   gegen System- und übernommene Wurzeln, zum Signaturzeitpunkt (`signingTime`, höchstens jetzt) und mit Zweck
   `smime_sign`, zuletzt Adressvergleich. Das Ergebnis steht im gemeinsamen `PgpStatus` mit `verfahren: smime`,
   zusätzlichen `hinweise` und `zertifikat_uebernehmbar`; die Anzeige baut wie bei OpenPGP auf der Rohmail auf.
+- `schreiben`: verschlüsselt eine MIME-Entität (`CMS_encrypt`, EnvelopedData, AES-256-CBC, RSA-Schlüsseltransport
+  bzw. ECDH bei EC) und erzeugt abgetrennte Signaturen (`CMS_sign`, SHA-256, mit Zwischenzertifikaten). Beim
+  Verschlüsseln wird zuerst ein `multipart/signed` gebaut und dieses verschlüsselt.
 - `SmimeDienst`: Verwaltung (Import, Wurzeln mit zweistufiger Bestätigung, Löschen, Entsperren), hält Passphrasen
-  nur im Arbeitsspeicher. `mail_anzeigen` fragt zuerst S/MIME, dann OpenPGP.
+  nur im Arbeitsspeicher. `mail_anzeigen` fragt zuerst S/MIME, dann OpenPGP. `versand_pruefen`/`versand_vorbereiten`
+  wählen je Empfänger das neueste jetzt gültige Zertifikat mit vertrauenswürdiger Kette (Zweck `smime_encrypt`).
+- Versand (`smtp::nachricht`): `Schutz::Pgp` bzw. `Schutz::Smime` teilen sich den Ablauf (An/Cc in einer Nachricht
+  samt eigenem Zertifikat, je Bcc eine eigene, nur signieren als `multipart/signed`). Das Verfahren steht im Entwurf
+  (`verfahren`, Standard `openpgp`, ältere Entwürfe laden unverändert); `pgp_versand_pruefen` prüft je nach Verfahren.
 - Oberfläche: Bereich „S/MIME-Zertifikate“ in `src/schluessel/smime.ts`, Statusleiste in `src/postfach/lesen.ts`
   (gleicher Stil wie OpenPGP, Texte mit „S/MIME“ und „Zertifikat“).
 

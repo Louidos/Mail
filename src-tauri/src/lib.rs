@@ -104,7 +104,9 @@ pub fn run() {
             // S/MIME teilt sich die Schlüsseldatenbank mit OpenPGP.
             let smime = Arc::new(smime::SmimeDienst::neu(pgp.db()));
             let senden = Arc::new(
-                smtp::dienst::SendeDienst::neu(konten.clone(), imap.clone()).mit_pgp(pgp.clone()),
+                smtp::dienst::SendeDienst::neu(konten.clone(), imap.clone())
+                    .mit_pgp(pgp.clone())
+                    .mit_smime(smime.clone()),
             );
             let griff = app.handle().clone();
             let melder: Melder = Arc::new(move |ereignis| {

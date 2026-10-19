@@ -253,7 +253,10 @@ Links unten öffnet **Schlüssel und Zertifikate** die Schlüsselverwaltung (obe
 
 ### Verschlüsselt und signiert senden
 
-Im Schreibfenster stehen zwei Schalter:
+Im Schreibfenster stehen zwei Schalter. Hat das Konto einen eigenen OpenPGP-Schlüssel **und** ein eigenes
+S/MIME-Zertifikat, wählst du davor das **Verfahren** (OpenPGP oder S/MIME); voreingestellt ist OpenPGP, bei Antworten
+auf eine S/MIME-Mail S/MIME. Gibt es nur eines davon, verwendet SicherMail dieses. Was unten für Schlüssel steht, gilt
+bei S/MIME für Zertifikate:
 
 - **Verschlüsseln (OpenPGP)**: Nur Empfänger mit dem passenden privaten Schlüssel können Text und Anhänge lesen.
   Dafür brauchst du von **jedem** Empfänger (An, Cc und Bcc) den öffentlichen Schlüssel und einen eigenen Schlüssel.
@@ -266,6 +269,10 @@ Im Schreibfenster stehen zwei Schalter:
   „Gesendet“ weiterhin lesen.
 - **Bcc** bei Verschlüsselung: Jeder Bcc-Empfänger bekommt eine eigene, nur für ihn verschlüsselte Mail. So erfahren
   die anderen Empfänger nichts von ihm.
+- **S/MIME**: Jeder Empfänger braucht ein gültiges, nicht abgelaufenes Zertifikat von einer vertrauenswürdigen
+  Stelle (importiert oder mit „Zertifikat übernehmen“ aus einer signierten Mail). Fehlt eines oder ist es
+  abgelaufen, nennt SicherMail den Empfänger und sendet nicht. Signiert wird mit deinem Zertifikat; beim ersten
+  Senden fragt SicherMail nach dessen Passphrase (dem Passwort der `.p12`-Datei).
 - **Nicht verschlüsselt** werden Betreff, Absender, Empfänger und Datum – schreibe Vertrauliches nicht in den Betreff.
 - Entwürfe liegen nur auf diesem Gerät (nie auf dem Server); in der Entwürfe-Liste sind verschlüsselte mit 🔒
   markiert.
@@ -310,7 +317,7 @@ Die Leiste über dem Inhalt sieht aus wie bei OpenPGP und nennt das Verfahren:
 
 - Wie bei OpenPGP wird nur entschlüsselt, wenn die ganze Mail verschlüsselt ist, und der Klartext wird nie
   gespeichert.
-- Mit S/MIME verschlüsselt und signiert **senden** folgt in einem nächsten Schritt.
+- Mit S/MIME verschlüsselt und signiert senden: siehe [Verschlüsselt und signiert senden](#verschlüsselt-und-signiert-senden).
 
 ## Wo liegen meine Daten?
 

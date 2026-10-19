@@ -34,12 +34,17 @@ pub struct Entwurf {
     pub referenzen: Vec<String>,
     #[serde(default)]
     pub anhaenge: Vec<AnhangAuswahl>,
-    /// Mit OpenPGP verschlüsseln (#44). Fehlt ein Empfängerschlüssel, wird nicht gesendet.
+    /// Verschlüsseln (#44, mit S/MIME #56). Fehlt ein Empfängerschlüssel bzw. -zertifikat, wird
+    /// nicht gesendet.
     #[serde(default)]
     pub verschluesseln: bool,
     /// Mit OpenPGP signieren (#44).
     #[serde(default)]
     pub signieren: bool,
+    /// Verfahren für „Verschlüsseln“ und „Signieren“: OpenPGP (Standard, auch für ältere
+    /// Entwürfe) oder S/MIME (#56).
+    #[serde(default)]
+    pub verfahren: crate::pgp::lesen::Verfahren,
 }
 
 /// So wird ein Entwurf gespeichert: Anhänge mit ihrer Quelle statt mit Token,
@@ -104,6 +109,29 @@ mod tests {
             aus_speicherform("e1", &gespeichert, &register)
                 .unwrap()
                 .verschluesseln
+        );
+    }
+
+    #[test]
+    fn verfahren_ist_standardmaessig_openpgp_und_wird_gespeichert() {
+        use crate::pgp::lesen::Verfahren;
+        let register = AnhangRegister::default();
+        // Entwurf von Version 0.3.0: mit OpenPGP-Feldern, ohne Verfahren
+        let alt = r#"{"konto":"k1","an":"bea@example.org","verschluesseln":true,"signieren":true}"#;
+        let entwurf = aus_speicherform("e1", alt, &register).unwrap();
+        assert_eq!(entwurf.verfahren, Verfahren::OpenPgp);
+        let mut neu = entwurf.clone();
+        neu.verfahren = Verfahren::Smime;
+        let gespeichert = speicherform(&neu, &register).unwrap();
+        assert!(
+            gespeichert.contains(r#""verfahren":"smime""#),
+            "{gespeichert}"
+        );
+        assert_eq!(
+            aus_speicherform("e1", &gespeichert, &register)
+                .unwrap()
+                .verfahren,
+            Verfahren::Smime
         );
     }
 

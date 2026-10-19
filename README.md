@@ -26,6 +26,7 @@ Version: **0.3.0** (siehe [Releases](https://github.com/Louidos/Mail/releases))
 - [x] Optionaler Proxy für externe Bilder
 - [x] Absender prüfen (DKIM/SPF/DMARC des eigenen Servers anzeigen, vor Fälschungen warnen)
 - [x] Ende-zu-Ende-Verschlüsselung mit OpenPGP
+- [x] Ende-zu-Ende-Verschlüsselung mit S/MIME
 - [x] Dunkle Darstellung (automatisch oder von Hand)
 - [x] Fertige Installationspakete für Windows, macOS und Linux in jedem Release
 
@@ -42,8 +43,6 @@ Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
 
 **Geplant:**
 
-- [ ] S/MIME-Verschlüsselung und -Signatur, Folge von #44 ([#56](https://github.com/Louidos/Mail/issues/56)) –
-  Lesen (Entschlüsseln, Signaturen prüfen) ist fertig, Senden folgt
 - [ ] Suche in Mails ([#49](https://github.com/Louidos/Mail/issues/49))
 - [ ] Gemeinsamer Posteingang für mehrere Konten ([#50](https://github.com/Louidos/Mail/issues/50))
 

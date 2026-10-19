@@ -22,7 +22,7 @@ use crate::imap::ordner::Ordner;
 use crate::konto::autoconfig::{self, Vorschlag};
 use crate::konto::schluesselbund::Schluesselbund;
 use crate::konto::{Konto, KontoEingabe, KontoVerwaltung, Pruefergebnis};
-use crate::pgp::lesen::{Verarbeitet, Verschluesselung};
+use crate::pgp::lesen::{Verarbeitet, Verfahren, Verschluesselung};
 use crate::pgp::schluessel::SchluesselInfo;
 use crate::pgp::{PgpDienst, Uebersicht, VersandPruefung};
 use crate::smime::zertifikat::{ZertifikatInfo, MAX_ZERTIFIKATSDATEI};
@@ -751,22 +751,29 @@ pub async fn pgp_loeschen(
     blockierend(move || pgp.loeschen(&fingerabdruck)).await
 }
 
-/// Prüft vor dem Senden, ob für „Verschlüsseln“ bzw. „Signieren“ alles da ist: Schlüssel aller
-/// Empfänger (An, Cc, Bcc), eigener Schlüssel und – zum Signieren – die Passphrase.
+/// Prüft vor dem Senden, ob für „Verschlüsseln“ bzw. „Signieren“ alles da ist: Schlüssel bzw.
+/// Zertifikate aller Empfänger (An, Cc, Bcc), eigener Schlüssel bzw. eigenes Zertifikat und – zum
+/// Signieren – die Passphrase. Das Verfahren (OpenPGP oder S/MIME) steht im Entwurf.
 #[tauri::command]
 pub async fn pgp_versand_pruefen(
     zustand: State<'_, AppZustand>,
     entwurf: Entwurf,
 ) -> Result<VersandPruefung, Fehlermeldung> {
     let adressen = crate::smtp::nachricht::alle_empfaenger(&entwurf)?;
-    let pgp = zustand.pgp.clone();
-    blockierend(move || {
-        pgp.versand_pruefen(
+    let (pgp, smime) = (zustand.pgp.clone(), zustand.smime.clone());
+    blockierend(move || match entwurf.verfahren {
+        Verfahren::OpenPgp => pgp.versand_pruefen(
             &entwurf.konto,
             &adressen,
             entwurf.verschluesseln,
             entwurf.signieren,
-        )
+        ),
+        Verfahren::Smime => smime.versand_pruefen(
+            &entwurf.konto,
+            &adressen,
+            entwurf.verschluesseln,
+            entwurf.signieren,
+        ),
     })
     .await
 }
