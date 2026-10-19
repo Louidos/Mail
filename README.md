@@ -21,14 +21,42 @@ Version: **0.2.0** (siehe [Releases](https://github.com/Louidos/Mail/releases))
 - [x] Mails sicher anzeigen
 - [x] Verschlüsselter lokaler Speicher
 - [x] Mails senden (SMTP)
+- [x] Sicheres Design in Blau/Weiss
+- [x] Sicherheitsprüfungen in CI (`cargo audit`, `npm audit`, Dependabot)
 
 Änderungen stehen im [CHANGELOG](CHANGELOG.md).
+
+## Was noch zu tun ist
+
+Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
+
+**Offen (bekannt):**
+
+- Zurzeit sind keine Fehler- oder Sicherheits-Issues offen. Alle offenen
+  [Issues](https://github.com/Louidos/Mail/issues) sind unten unter „Geplant“ verlinkt.
+
+**Geplant:**
+
+- [ ] Ende-zu-Ende-Verschlüsselung mit OpenPGP, später S/MIME ([#44](https://github.com/Louidos/Mail/issues/44))
+- [ ] Absender prüfen: DKIM/SPF/DMARC anzeigen und vor gefälschten Absendern warnen ([#45](https://github.com/Louidos/Mail/issues/45))
+- [ ] Optionale Einstellung „Proxy für externe Bilder verwenden“, Folge von #24 ([#46](https://github.com/Louidos/Mail/issues/46))
+- [ ] Dunkle Darstellung wieder anbieten, entfiel mit #31 ([#47](https://github.com/Louidos/Mail/issues/47))
+- [ ] Fertige Installationspakete für Windows, macOS und Linux in jedem Release ([#48](https://github.com/Louidos/Mail/issues/48))
+- [ ] Suche in Mails ([#49](https://github.com/Louidos/Mail/issues/49))
+- [ ] Gemeinsamer Posteingang für mehrere Konten ([#50](https://github.com/Louidos/Mail/issues/50))
+
+**Bewusst nicht geplant** (siehe [Sicherheitskonzept](docs/sicherheit.md#was-bewusst-nicht-abgedeckt-ist)):
+
+- POP3 und Exchange/EWS – SicherMail spricht nur IMAP und SMTP.
+- Telemetrie, Absturzberichte und automatische Update-Abfragen.
+- Fremddienste (zentrale Konfigurationsdatenbanken, Cloud-Dienste); verbunden wird nur mit den eigenen Servern.
 
 ## Installation für Entwicklung
 
 Voraussetzungen:
 
-- [Rust](https://www.rust-lang.org/tools/install) (stabil, mindestens 1.90)
+- [Rust](https://www.rust-lang.org/tools/install) (stabil, mindestens 1.90 – `rust-version` in
+  `src-tauri/Cargo.toml`)
 - [Node.js](https://nodejs.org/) 22 mit npm
 - Systembibliotheken für Tauri 2, siehe <https://v2.tauri.app/start/prerequisites/>.
   Unter Debian/Ubuntu:
@@ -55,9 +83,10 @@ npm run tauri build    # Installationspaket bauen
 ```sh
 npm test               # Frontend-Tests (Vitest)
 npm run lint           # ESLint und TypeScript-Prüfung
+npm run build          # Frontend bauen
 cd src-tauri
 cargo fmt --check
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
@@ -73,14 +102,39 @@ Getestet wird nie gegen echte Postfächer.
 
 ## Aufbau
 
-| Ordner       | Inhalt                                                           |
-| ------------ | ---------------------------------------------------------------- |
-| `src/`       | Frontend (TypeScript, Vite)                                      |
-| `src-tauri/` | Rust-Backend (Tauri 2)                                           |
-| `public/`    | statische Dateien (Icons)                                        |
-| `tests/`     | Frontend-Tests und Integrationstests gegen einen Test-Mailserver |
-| `docs/`      | Doku: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Sicherheit](docs/sicherheit.md) |
-| `scripts/`   | Hilfsskripte                                                     |
+| Ordner                | Inhalt                                                                                         |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| `src/`                | Frontend (TypeScript, Vite, ohne Framework): `konto/` (Konto einrichten), `postfach/` (Mailliste und Leseansicht), `verfassen/` (Schreiben, Antworten, Entwürfe), `einstellungen/` |
+| `src-tauri/`          | Rust-Backend (Tauri 2); Module in `src-tauri/src/`: `konto`, `imap`, `smtp`, `speicher`, `anzeige`, dazu `tls` und `befehle` |
+| `public/`             | statische Dateien (Icons)                                                                      |
+| `tests/`              | Frontend-Tests (Vitest)                                                                        |
+| `tests/integration/`  | Rust-Integrationstests, u. a. gegen den Test-Mailserver (je Datei ein `[[test]]` in `src-tauri/Cargo.toml`) |
+| `docs/`               | Doku: [Bedienung](docs/bedienung.md), [Architektur](docs/architektur.md), [Sicherheit](docs/sicherheit.md) |
+| `scripts/`            | Hilfsskripte ([`test-mailserver.sh`](scripts/test-mailserver.sh) für GreenMail)                 |
+| `.github/`            | CI- und Release-Workflow, Vorlagen für Issues und Pull Requests                                |
+
+Mehr zum Aufbau des Backends steht in der [Architektur](docs/architektur.md).
+
+## Mitmachen und Arbeitsweise
+
+- **Ein Branch pro Thema**, immer vom aktuellen `main` (z. B. `feature/…`, `fix/…`, `docs/…`). Nie direkt auf
+  `main` arbeiten; `main` ist immer lauffähig.
+- **Commits** nach [Conventional Commits](https://www.conventionalcommits.org/de/) mit kurzem deutschem Text:
+  `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `security:`.
+- **CHANGELOG**: Spürbare Änderungen kommen in [CHANGELOG.md](CHANGELOG.md) unter `## Unveröffentlicht`
+  (Hinzugefügt / Geändert / Behoben / Entfernt), mit Issue-Nummer und für Nutzer geschrieben.
+- **Tests**: Für neue Funktionen und behobene Fehler Tests ergänzen. Alle Prüfungen aus
+  [Tests und Prüfungen](#tests-und-prüfungen) müssen grün sein; getestet wird nie gegen echte Postfächer.
+- **Pull Request** gegen `main` mit der [PR-Vorlage](.github/pull_request_template.md) und `Closes #<n>`.
+  Gemergt wird erst bei grüner CI, per Squash-Merge.
+- **Aufgabenliste**: Wer einen Punkt aus [Was noch zu tun ist](#was-noch-zu-tun-ist) erledigt, hakt ihn im
+  selben PR ab bzw. entfernt ihn.
+- **Versionen** nach [SemVer](https://semver.org/lang/de/): PATCH für Fehlerbehebungen, MINOR für neue
+  Funktionen, MAJOR für Inkompatibles. Release: Branch `release/X.Y.Z`, Version in `package.json`,
+  `src-tauri/Cargo.toml` (+ `Cargo.lock`), `src-tauri/tauri.conf.json`, CHANGELOG und README setzen, Commit
+  `chore: Version X.Y.Z`, PR und Squash-Merge; danach Tag `vX.Y.Z` auf `main`. Der
+  [Release-Workflow](.github/workflows/release.yml) erstellt dann das GitHub-Release mit dem CHANGELOG-Abschnitt.
+  Tags werden nie verschoben oder gelöscht.
 
 ## Sicherheit
 
