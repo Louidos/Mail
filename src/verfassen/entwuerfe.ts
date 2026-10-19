@@ -36,7 +36,12 @@ export async function entwuerfeOeffnen(konto: Konto, oeffnen: (entwurf: Entwurf)
           weg.addEventListener("click", async () => {
             const ok = await bestaetigen({ titel: "Entwurf löschen?", text: entwurf.betreff || "(kein Betreff)", ja: "Löschen", warnung: true });
             if (!ok || !entwurf.id) return;
-            await api.entwurfLoeschen(entwurf.id);
+            try {
+              await api.entwurfLoeschen(entwurf.id);
+            } catch (fehler) {
+              status.textContent = fehlertext(fehler);
+              return;
+            }
             await laden();
           });
           return el(

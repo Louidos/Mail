@@ -165,3 +165,31 @@ describe("Verfassen-Fenster", () => {
     expect(document.body.contains(dialog)).toBe(true);
   });
 });
+
+describe("Entwürfe-Liste", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    document.body.replaceChildren();
+  });
+
+  it("zeigt einen Fehler an, wenn das Löschen eines Entwurfs scheitert", async () => {
+    const { entwuerfeOeffnen } = await import("../src/verfassen/entwuerfe");
+    const entwurf = { ...leererEntwurf("k1"), id: "e1", betreff: "Alt" };
+    invoke.mockImplementation((befehl: string) => {
+      if (befehl === "entwuerfe_auflisten") return Promise.resolve([entwurf]);
+      if (befehl === "entwurf_loeschen") return Promise.reject({ art: "speicher", meldung: "Speicher gesperrt." });
+      return Promise.resolve(undefined);
+    });
+    const dialog = await entwuerfeOeffnen(konto, vi.fn());
+    const knopf = (text: string) =>
+      [...document.querySelectorAll("button")].find((k) => k.textContent === text) as HTMLButtonElement;
+    knopf("Löschen").click();
+    await warten();
+    // Bestätigungsdialog: endgültig löschen
+    [...document.querySelectorAll("dialog.bestaetigen button")].find((k) => k.textContent === "Löschen")!.dispatchEvent(new MouseEvent("click"));
+    await warten();
+    await warten();
+    expect(dialog.querySelector(".status")?.textContent).toBe("Speicher gesperrt.");
+    expect(dialog.querySelector(".entwurf-betreff")?.textContent).toBe("Alt");
+  });
+});
