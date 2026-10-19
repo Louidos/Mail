@@ -97,6 +97,11 @@ jobs:
           toolchain: ${{ steps.werte.outputs.rust }}
           targets: ${{ matrix.rust_ziele }}
 
+      - name: Perl für die mitgelieferte OpenSSL wählen (Windows)
+        if: runner.os == 'Windows'
+        # Das Perl der Git-Bash kann OpenSSL nicht konfigurieren; Strawberry Perl liegt auf dem Runner bereit.
+        run: echo "OPENSSL_SRC_PERL=C:/Strawberry/perl/bin/perl.exe" >> "$GITHUB_ENV"
+
       - name: npm ci
         run: npm ci
 
