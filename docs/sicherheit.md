@@ -133,6 +133,36 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 - **Passphrase zum Signieren** wird beim Senden abgefragt und – wie beim Lesen – nur bis zum Programmende im
   Arbeitsspeicher gehalten.
 
+### Ende-zu-Ende-Verschlüsselung (S/MIME)
+
+- Bibliothek: OpenSSL (Crate `openssl`), dieselbe mitkompilierte Fassung wie für SQLCipher, keine Systembibliothek
+  zur Laufzeit (Begründung in der [Architektur](architektur.md#smime-smime)).
+- **Eigene Zertifikate** kommen aus PKCS#12-Dateien (`.p12`/`.pfx`) und werden nur angenommen, wenn eine Adresse im
+  Zertifikat (SAN `rfc822Name`, ersatzweise Subject `E=`) zur Kontoadresse passt, der Schlüssel zum Zertifikat gehört,
+  der Zweck passt (KeyUsage, ExtendedKeyUsage „E-Mail-Schutz“), es nicht abgelaufen ist und der Schlüssel stark genug
+  ist (RSA ab 2048 Bit). Der private Schlüssel liegt in `schluessel.db` (SQLCipher) und ist zusätzlich mit der
+  Passphrase geschützt (scrypt + AES-256-GCM); die Passphrase ist das Passwort der Datei. Passphrasen werden nie
+  gespeichert und nach dem Entsperren höchstens bis zum Programmende im Arbeitsspeicher gehalten (`zeroize`). Das
+  Frontend sieht nie einen privaten Schlüssel; Dateien wählt das Backend.
+- **Zertifikate anderer** kommen nur aus Dateien (`.cer`, `.crt`, `.pem`, `.p7c`) oder auf Klick „Zertifikat
+  übernehmen“ aus einer gültig und ganz signierten Mail. Es gibt keine Verzeichnisdienste (LDAP) und keine
+  Online-Abfragen.
+- **Vertrauen**: Eine Kette muss zu einer Wurzel im Zertifikatsspeicher des Betriebssystems oder zu einer vom Nutzer
+  übernommenen Wurzel führen. Eine Wurzel wird erst übernommen, nachdem Name und SHA-256-Fingerabdruck angezeigt und
+  bestätigt wurden; sie lässt sich wieder entfernen. Mitgelieferte Zwischenzertifikate helfen nur beim Aufbau der
+  Kette. **Sperrlisten (CRL) und OCSP werden nicht abgefragt**; bei jeder geprüften Signatur steht dezent
+  „Sperrstatus nicht online geprüft“. Ein gestohlenes, aber gesperrtes Zertifikat erkennt SicherMail also nicht.
+- **Entschlüsseln** nach denselben Regeln wie bei OpenPGP: nur wenn die **ganze** Mail verschlüsselt ist (EFAIL),
+  verschlüsselte Teile neben unverschlüsselten nur als „teilweise verschlüsselt“ gekennzeichnet, höchstens 64 MB,
+  Klartext nie gespeichert, Anzeige durch dieselbe sichere Darstellung. Nur AES-GCM (AuthEnvelopedData) und AES-CBC;
+  RC2, DES und Triple-DES werden abgelehnt. Bei AES-CBC ohne gültige innere Signatur steht der Hinweis „nicht gegen
+  Veränderung geschützt“, weil CBC allein Veränderungen nicht erkennt.
+- **Signaturen** gelten nur als gültig, wenn die Kette vertrauenswürdig ist, das Zertifikat zum Zeitpunkt der Signatur
+  gültig war, der Zweck passt und eine Adresse im Zertifikat zum Absender passt. Sonst steht deutlich da: unbekannte
+  Stelle, abgelaufen, Adresse passt nicht, ungültig (verändert) oder nur teilweise signiert. MD5 und RSA unter
+  2048 Bit werden abgelehnt, SHA-1 als „schwach“ gekennzeichnet. Der Zeitpunkt stammt aus der Signatur (`signingTime`)
+  und ist nicht später als jetzt; ist das Zertifikat inzwischen abgelaufen, steht ein Hinweis dabei.
+
 ### Tauri und Oberfläche
 
 - Strenge CSP im Hauptfenster: nur eigene Skripte, keine Remote-URLs, keine Formulare, keine fremden Frames.
@@ -192,10 +222,12 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 
 ## Was bewusst nicht abgedeckt ist
 
-- **Mit OpenPGP geschützt ist nur der Inhalt**: Text und Anhänge verschlüsselter Mails liegen auch auf dem Server
+- **Mit OpenPGP bzw. S/MIME geschützt ist nur der Inhalt**: Text und Anhänge verschlüsselter Mails liegen auch auf dem Server
   verschlüsselt. **Metadaten** wie Betreff, Absender, Empfänger und Datum stehen weiterhin im Klartext im Kopf der Mail.
   Unverschlüsselte Mails liegen auf dem Server so, wie der Server sie speichert.
-- **Kein S/MIME** (geplant in [#56](https://github.com/Louidos/Mail/issues/56)).
+- **S/MIME ohne Sperrprüfung**: CRL und OCSP werden bewusst nicht abgefragt (keine Verbindungen zu fremden Diensten);
+  gesperrte Zertifikate erkennt SicherMail nicht. Verschlüsselt und signiert senden mit S/MIME folgt in
+  [#56](https://github.com/Louidos/Mail/issues/56) (Teil 2).
 - **OpenPGP-Schlüsselverwaltung ohne Vertrauensnetz**: Ablauf und Widerruf von Schlüsseln werden nicht ausgewertet,
   Beglaubigungen (Web of Trust) nicht geprüft. Ob ein Schlüssel wirklich der Person gehört, muss der Nutzer über den
   Fingerabdruck selbst prüfen.

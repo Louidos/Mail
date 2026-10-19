@@ -9,6 +9,7 @@ import type {
   Ordner,
   PgpStatus,
   PruefMethode,
+  Verfahren,
 } from "../api";
 import { el } from "../dom";
 import { datumLang, groesse } from "./format";
@@ -25,8 +26,10 @@ export interface LeseAktionen {
   absenderErlauben: (adresse: string) => void;
   anhangSpeichern: (index: number) => void;
   linkKlick: (klick: LinkKlick) => void;
-  /** Passphrase für den eigenen Schlüssel eingeben (bis zum Programmende). */
-  pgpEntsperren: (fingerabdruck: string, passphrase: string) => void;
+  /** Passphrase für den eigenen Schlüssel bzw. das eigene Zertifikat eingeben (bis zum Programmende). */
+  pgpEntsperren: (fingerabdruck: string, passphrase: string, verfahren: Verfahren) => void;
+  /** S/MIME: Zertifikat des Absenders einer gültig signierten Mail übernehmen. */
+  zertifikatUebernehmen: () => void;
   /** Öffentlichen Schlüssel aus einem Anhang importieren. */
   schluesselImportieren: (index: number) => void;
 }
@@ -114,30 +117,48 @@ interface PgpZeile {
   text: string;
 }
 
-/** Texte für das Ergebnis von Entschlüsselung und Signaturprüfung – immer mit Symbol und Text. */
+/** Teil des S/MIME-Hinweises bei AES-CBC ohne gültige Signatur (siehe `smime::lesen::CBC_HINWEIS`). */
+const CBC_MERKMAL = "nicht gegen Veränderung geschützt";
+
+/**
+ * Texte für das Ergebnis von Entschlüsselung und Signaturprüfung – immer mit Symbol und Text.
+ * Bei S/MIME (#56) nennen die Texte das Verfahren und sprechen von Zertifikaten.
+ */
 export function pgpZeilen(pgp: PgpStatus): PgpZeile[] {
+  const smime = pgp.verfahren === "smime";
   const zeilen: PgpZeile[] = [];
   switch (pgp.verschluesselung) {
     case "entschluesselt":
-      zeilen.push({ art: "gut", symbol: "🔒", text: "Verschlüsselt" });
+      zeilen.push({ art: "gut", symbol: "🔒", text: smime ? "Verschlüsselt (S/MIME)" : "Verschlüsselt" });
       break;
     case "nicht_entschluesselt":
-      zeilen.push({ art: "warnung", symbol: "🔒", text: "Kann nicht entschlüsselt werden" });
+      zeilen.push({
+        art: "warnung",
+        symbol: "🔒",
+        text: smime ? "Kann nicht entschlüsselt werden (S/MIME)" : "Kann nicht entschlüsselt werden",
+      });
       break;
     case "teilweise":
       zeilen.push({ art: "warnung", symbol: "⚠", text: "Nur teilweise verschlüsselt" });
       break;
   }
-  const von = pgp.signierer ? ` (Schlüssel von ${pgp.signierer})` : "";
+  const von = pgp.signierer ? ` (${smime ? "Zertifikat" : "Schlüssel"} von ${pgp.signierer})` : "";
   switch (pgp.signatur) {
     case "gueltig":
-      zeilen.push({ art: "gut", symbol: "✓", text: `Signiert und gültig${von}` });
+      zeilen.push({ art: "gut", symbol: "✓", text: `${smime ? "Mit S/MIME signiert" : "Signiert"} und gültig${von}` });
       break;
     case "andere_adresse":
       zeilen.push({
         art: "warnung",
         symbol: "⚠",
-        text: `Signatur gültig, aber der Schlüssel gehört nicht zur Absenderadresse${von}`,
+        text: `Signatur gültig, aber ${smime ? "das Zertifikat" : "der Schlüssel"} gehört nicht zur Absenderadresse${von}`,
+      });
+      break;
+    case "abgelaufen":
+      zeilen.push({
+        art: "warnung",
+        symbol: "⚠",
+        text: `Mit S/MIME signiert, aber das Zertifikat war beim Signieren abgelaufen oder noch nicht gültig${von}`,
       });
       break;
     case "ungueltig":
@@ -148,11 +169,19 @@ export function pgpZeilen(pgp: PgpStatus): PgpZeile[] {
       });
       break;
     case "unbekannt":
-      zeilen.push({
-        art: "neutral",
-        symbol: "?",
-        text: `Signiert, Schlüssel unbekannt${pgp.signierer_schluessel ? ` (${pgp.signierer_schluessel})` : ""}`,
-      });
+      zeilen.push(
+        smime
+          ? {
+              art: "warnung",
+              symbol: "?",
+              text: `Mit S/MIME signiert, aber von einer unbekannten Zertifizierungsstelle${von}${pgp.signierer_schluessel ? ` (Fingerabdruck ${pgp.signierer_schluessel})` : ""}`,
+            }
+          : {
+              art: "neutral",
+              symbol: "?",
+              text: `Signiert, Schlüssel unbekannt${pgp.signierer_schluessel ? ` (${pgp.signierer_schluessel})` : ""}`,
+            },
+      );
       break;
   }
   if (pgp.signatur !== "keine" && pgp.signatur_teilweise) {
@@ -162,10 +191,17 @@ export function pgpZeilen(pgp: PgpStatus): PgpZeile[] {
       text: "Nur ein Teil dieser Mail ist signiert. Was ausserhalb steht, kann von jemand anderem stammen.",
     });
   }
+  for (const hinweis of pgp.hinweise ?? []) {
+    zeilen.push(
+      hinweis.includes(CBC_MERKMAL)
+        ? { art: "warnung", symbol: "⚠", text: hinweis }
+        : { art: "neutral", symbol: "ℹ", text: hinweis },
+    );
+  }
   return zeilen;
 }
 
-/** Leiste mit dem OpenPGP-Ergebnis; fragt bei Bedarf nach der Passphrase. */
+/** Leiste mit dem Ergebnis (OpenPGP oder S/MIME); fragt bei Bedarf nach der Passphrase. */
 function pgpLeiste(pgp: PgpStatus, aktionen: LeseAktionen): HTMLElement | null {
   const zeilen = pgpZeilen(pgp);
   if (zeilen.length === 0) return null;
@@ -178,20 +214,33 @@ function pgpLeiste(pgp: PgpStatus, aktionen: LeseAktionen): HTMLElement | null {
     ),
   );
   if (pgp.meldung) teile.push(el("p", { class: "pgp-meldung" }, pgp.meldung));
+  const verfahren: Verfahren = pgp.verfahren ?? "openpgp";
+  if (verfahren === "smime" && pgp.zertifikat_uebernehmbar) {
+    const uebernehmen = el("button", { type: "button", class: "klein" }, "Zertifikat übernehmen");
+    uebernehmen.addEventListener("click", () => aktionen.zertifikatUebernehmen());
+    teile.push(
+      el(
+        "div",
+        { class: "pgp-entsperren" },
+        el("span", { class: "leise" }, "Mit dem Zertifikat kannst du dem Absender später verschlüsselt schreiben."),
+        uebernehmen,
+      ),
+    );
+  }
   if (pgp.passphrase_fuer) {
     const fingerabdruck = pgp.passphrase_fuer;
     const feld = el("input", {
       type: "password",
       name: "pgp_passphrase",
       autocomplete: "off",
-      "aria-label": "Passphrase deines Schlüssels",
+      "aria-label": verfahren === "smime" ? "Passphrase deines S/MIME-Zertifikats" : "Passphrase deines Schlüssels",
       placeholder: "Passphrase",
     });
     const knopf = el("button", { type: "submit", class: "klein haupt" }, "Entsperren");
     const formular = el(
       "form",
       { class: "pgp-entsperren" },
-      el("span", { class: "leise" }, `Schlüssel ${fingerabdruck}`),
+      el("span", { class: "leise" }, `${verfahren === "smime" ? "Zertifikat" : "Schlüssel"} ${fingerabdruck}`),
       feld,
       knopf,
     );
@@ -199,7 +248,7 @@ function pgpLeiste(pgp: PgpStatus, aktionen: LeseAktionen): HTMLElement | null {
       ereignis.preventDefault();
       const passphrase = feld.value;
       feld.value = "";
-      if (passphrase) aktionen.pgpEntsperren(fingerabdruck, passphrase);
+      if (passphrase) aktionen.pgpEntsperren(fingerabdruck, passphrase, verfahren);
     });
     teile.push(
       formular,

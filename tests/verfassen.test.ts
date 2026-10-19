@@ -55,6 +55,9 @@ const mail: AufbereiteteMail = {
     signierer_schluessel: null,
     meldung: null,
     passphrase_fuer: null,
+    verfahren: "openpgp",
+    hinweise: [],
+    zertifikat_uebernehmbar: false,
   },
 };
 

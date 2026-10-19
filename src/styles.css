@@ -979,7 +979,7 @@ form.pgp-entsperren input {
   min-width: 10rem;
 }
 
-/* Dialog „Schlüssel (OpenPGP)“ */
+/* Dialog „Schlüssel und Zertifikate“ (OpenPGP und S/MIME) */
 dialog.schluessel-dialog {
   max-width: min(720px, 95vw);
 }

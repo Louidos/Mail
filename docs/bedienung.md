@@ -212,7 +212,7 @@ Signaturen zeigen, ob eine Mail wirklich vom Inhaber eines Schlüssels stammt un
 
 ### Schlüssel verwalten
 
-Links unten öffnet **Schlüssel (OpenPGP)** die Schlüsselverwaltung.
+Links unten öffnet **Schlüssel und Zertifikate** die Schlüsselverwaltung (oben OpenPGP, darunter S/MIME).
 
 - **Eigener Schlüssel** (einer pro Konto):
   - **Schlüssel erzeugen**: Passphrase (mindestens 8 Zeichen) zweimal eingeben. SicherMail erzeugt einen modernen
@@ -269,6 +269,48 @@ Im Schreibfenster stehen zwei Schalter:
 - **Nicht verschlüsselt** werden Betreff, Absender, Empfänger und Datum – schreibe Vertrauliches nicht in den Betreff.
 - Entwürfe liegen nur auf diesem Gerät (nie auf dem Server); in der Entwürfe-Liste sind verschlüsselte mit 🔒
   markiert.
+
+## Verschlüsselung mit S/MIME
+
+S/MIME ist das zweite verbreitete Verfahren für verschlüsselte und signierte Mails (z. B. in Firmen und Behörden).
+Statt eigener Schlüssel verwendet es **Zertifikate**, die eine Zertifizierungsstelle ausstellt.
+
+### Zertifikat importieren
+
+Unter **Schlüssel und Zertifikate** → **S/MIME-Zertifikate**:
+
+- **Eigenes Zertifikat** (pro Konto): Passwort der `.p12`/`.pfx`-Datei eingeben, dann **Eigenes Zertifikat
+  importieren …** klicken und die Datei wählen. SicherMail nimmt das Zertifikat nur an, wenn es für die Adresse des
+  Kontos ausgestellt ist, für Mails bestimmt ist, nicht abgelaufen ist und einen ausreichend starken Schlüssel hat
+  (RSA ab 2048 Bit) – sonst steht dort, was nicht passt. Das Passwort der Datei schützt danach auch den gespeicherten
+  privaten Schlüssel; nach jedem Start fragt SicherMail einmal danach, wenn es gebraucht wird.
+- **Zertifikate anderer**: **Zertifikat importieren …** liest `.cer`, `.crt`, `.pem` oder `.p7c`. Bequemer: Bei einer
+  gültig signierten Mail steht **Zertifikat übernehmen**.
+- **Übernommene Wurzelzertifikate**: Vertraut wird den Zertifizierungsstellen im Zertifikatsspeicher deines Systems.
+  Stammt ein Zertifikat von einer anderen Stelle (z. B. der eigenen Firma), kannst du deren Wurzel mit
+  **Wurzelzertifikat übernehmen …** hinzufügen. SicherMail zeigt Name und Fingerabdruck; vergleiche ihn mit einer
+  vertrauenswürdigen Quelle, bevor du bestätigst. **Entfernen** nimmt die Wurzel wieder heraus.
+- **Löschen** (mit Rückfrage) entfernt ein Zertifikat endgültig; bei eigenen Zertifikaten auch den privaten Schlüssel.
+
+### S/MIME-Mails lesen
+
+Die Leiste über dem Inhalt sieht aus wie bei OpenPGP und nennt das Verfahren:
+
+| Anzeige | Bedeutung |
+| --- | --- |
+| 🔒 Verschlüsselt (S/MIME) | Die Mail war verschlüsselt und wurde entschlüsselt. |
+| 🔒 Kann nicht entschlüsselt werden (S/MIME) | Kein passendes Zertifikat, Passphrase fehlt, unsicheres Verfahren (RC2, DES) oder beschädigt. |
+| ✓ Mit S/MIME signiert und gültig (Zertifikat von …) | Kette vertrauenswürdig, Zertifikat beim Signieren gültig, Adresse passt. |
+| ? … von einer unbekannten Zertifizierungsstelle | Die Stelle ist weder im System noch von dir übernommen. |
+| ⚠ … Zertifikat war beim Signieren abgelaufen | Das Zertifikat galt zum Zeitpunkt der Signatur nicht. |
+| ⚠ Signatur gültig, aber das Zertifikat gehört nicht zur Absenderadresse | Signiert hat jemand anderes als der angegebene Absender. |
+| ✗ Signatur ungültig | Verändert, beschädigt, unsicheres Verfahren (MD5) oder nicht für Mails bestimmt. |
+| ⚠ Verschlüsselt, aber nicht gegen Veränderung geschützt | Altes Verfahren (AES-CBC) ohne gültige Signatur. |
+| ℹ Sperrstatus nicht online geprüft | SicherMail fragt keine Sperrlisten ab (keine Verbindung zu fremden Diensten). |
+
+- Wie bei OpenPGP wird nur entschlüsselt, wenn die ganze Mail verschlüsselt ist, und der Klartext wird nie
+  gespeichert.
+- Mit S/MIME verschlüsselt und signiert **senden** folgt in einem nächsten Schritt.
 
 ## Wo liegen meine Daten?
 

@@ -55,15 +55,29 @@ pub enum Signatur {
     Unbekannt,
     /// Signatur passt nicht zum Inhalt (manipuliert) oder ist kaputt.
     Ungueltig,
+    /// Nur S/MIME: Das Zertifikat war zum Zeitpunkt der Signatur abgelaufen oder noch nicht gültig.
+    Abgelaufen,
     /// Mathematisch gültig, aber der Schlüssel gehört nicht zur Absenderadresse.
     AndereAdresse,
     /// Gültig und der Schlüssel gehört zur Absenderadresse.
     Gueltig,
 }
 
-/// Ergebnis für die Anzeige.
+/// Verfahren der Ende-zu-Ende-Verschlüsselung.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Verfahren {
+    #[default]
+    OpenPgp,
+    /// S/MIME (#56)
+    Smime,
+}
+
+/// Ergebnis für die Anzeige (OpenPGP und S/MIME).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct PgpStatus {
+    /// OpenPGP oder S/MIME.
+    pub verfahren: Verfahren,
     pub verschluesselung: Verschluesselung,
     pub signatur: Signatur,
     /// Nur ein Teil der Mail ist signiert.
@@ -76,6 +90,11 @@ pub struct PgpStatus {
     pub meldung: Option<String>,
     /// Fingerabdruck (zur Anzeige) des eigenen Schlüssels, dessen Passphrase fehlt.
     pub passphrase_fuer: Option<String>,
+    /// Zusätzliche, dezente Hinweise (nur S/MIME, z. B. „Sperrstatus nicht online geprüft“).
+    pub hinweise: Vec<String>,
+    /// Nur S/MIME: Das Zertifikat des Absenders kann übernommen werden (gültig signiert und noch
+    /// nicht gespeichert).
+    pub zertifikat_uebernehmbar: bool,
 }
 
 impl PgpStatus {
@@ -101,6 +120,8 @@ pub struct Verarbeitet {
     /// (entschlüsselt oder ohne Signaturteil). Nie dauerhaft speichern.
     pub roh: Option<Zeroizing<Vec<u8>>>,
     pub status: PgpStatus,
+    /// Nur S/MIME: Zertifikat des Signierers (DER), wenn die Signatur gültig ist.
+    pub zertifikat: Option<Vec<u8>>,
 }
 
 /// Fehler beim Entschlüsseln.
@@ -286,7 +307,7 @@ fn inline_verarbeiten(
     }
 }
 
-const TEILWEISE_VERSCHLUESSELT: &str = "Nur ein Teil dieser Mail ist verschlüsselt. Aus Sicherheitsgründen wird er nicht automatisch entschlüsselt, weil unverschlüsselte Teile den Inhalt verfälschen oder ausspähen könnten.";
+pub(crate) const TEILWEISE_VERSCHLUESSELT: &str = "Nur ein Teil dieser Mail ist verschlüsselt. Aus Sicherheitsgründen wird er nicht automatisch entschlüsselt, weil unverschlüsselte Teile den Inhalt verfälschen oder ausspähen könnten.";
 
 /// Sucht einen Armor-Block im Text. Gibt den Block und ob er der ganze Text ist zurück.
 fn block_finden<'a>(text: &'a str, (anfang, ende): (&str, &str)) -> Option<(&'a str, bool)> {
@@ -343,7 +364,7 @@ fn teile_pruefen(
 }
 
 /// Absenderadresse (erste From-Adresse), kleingeschrieben.
-fn absender_von(nachricht: &MimeNachricht) -> Option<String> {
+pub(crate) fn absender_von(nachricht: &MimeNachricht) -> Option<String> {
     nachricht
         .from()
         .and_then(|a| a.first())
@@ -352,7 +373,7 @@ fn absender_von(nachricht: &MimeNachricht) -> Option<String> {
 }
 
 /// MIME-Typ eines Teils, kleingeschrieben (`typ/untertyp`), leer wenn unbekannt.
-fn mime_typ(nachricht: &MimeNachricht, teil: usize) -> String {
+pub(crate) fn mime_typ(nachricht: &MimeNachricht, teil: usize) -> String {
     nachricht
         .parts
         .get(teil)
@@ -368,7 +389,7 @@ fn mime_typ(nachricht: &MimeNachricht, teil: usize) -> String {
 }
 
 /// Inhalt (dekodiert) des `nr`-ten Kindes eines Multipart-Teils.
-fn kind_inhalt(nachricht: &MimeNachricht, teil: usize, nr: usize) -> Option<Vec<u8>> {
+pub(crate) fn kind_inhalt(nachricht: &MimeNachricht, teil: usize, nr: usize) -> Option<Vec<u8>> {
     let PartType::Multipart(kinder) = &nachricht.parts.get(teil)?.body else {
         return None;
     };
@@ -378,7 +399,11 @@ fn kind_inhalt(nachricht: &MimeNachricht, teil: usize, nr: usize) -> Option<Vec<
 
 /// Baut eine anzeigbare Mail: äussere Kopfzeilen (ohne `Content-*` und `MIME-Version`) und
 /// die innere MIME-Entität.
-fn mit_aeusserem_kopf(roh: &[u8], nachricht: &MimeNachricht, innen: &[u8]) -> Zeroizing<Vec<u8>> {
+pub(crate) fn mit_aeusserem_kopf(
+    roh: &[u8],
+    nachricht: &MimeNachricht,
+    innen: &[u8],
+) -> Zeroizing<Vec<u8>> {
     let mut neu = Zeroizing::new(Vec::with_capacity(innen.len() + 2048));
     for kopf in nachricht.headers() {
         let name = kopf.name.as_str().to_ascii_lowercase();
@@ -398,7 +423,7 @@ fn mit_aeusserem_kopf(roh: &[u8], nachricht: &MimeNachricht, innen: &[u8]) -> Ze
 }
 
 /// Wandelt alle Zeilenenden in CRLF um (kanonische Form für Signaturen, RFC 3156).
-fn crlf(daten: &[u8]) -> Vec<u8> {
+pub(crate) fn crlf(daten: &[u8]) -> Vec<u8> {
     let mut aus = Vec::with_capacity(daten.len() + daten.len() / 32);
     let mut vorher = 0u8;
     for &b in daten {
@@ -451,7 +476,7 @@ fn signiert_pruefen(
 
 /// Der signierte Teil zwischen dem ersten und dem zweiten Begrenzer, genau wie übertragen
 /// (ohne das CRLF vor dem zweiten Begrenzer).
-fn signierter_teil<'a>(entitaet: &'a [u8], grenze: &str) -> Option<&'a [u8]> {
+pub(crate) fn signierter_teil<'a>(entitaet: &'a [u8], grenze: &str) -> Option<&'a [u8]> {
     let begrenzer = format!("--{grenze}");
     let b = begrenzer.as_bytes();
     // Erster Begrenzer am Zeilenanfang
@@ -472,7 +497,7 @@ fn signierter_teil<'a>(entitaet: &'a [u8], grenze: &str) -> Option<&'a [u8]> {
     entitaet.get(start..ende)
 }
 
-fn finden(heu: &[u8], nadel: &[u8]) -> Option<usize> {
+pub(crate) fn finden(heu: &[u8], nadel: &[u8]) -> Option<usize> {
     heu.windows(nadel.len()).position(|w| w == nadel)
 }
 

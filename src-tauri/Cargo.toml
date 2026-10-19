@@ -44,6 +44,12 @@ hex = "0.4"
 pgp = { version = "0.21", default-features = false }
 rand = { version = "0.8", default-features = false, features = ["std", "getrandom"] }
 smallvec = "1"
+# S/MIME (#56): dieselbe OpenSSL, die für SQLCipher ohnehin mitkompiliert wird (vendored, keine
+# Systembibliothek); dazu die Wurzelzertifikate des Betriebssystems.
+openssl = { version = "0.10", features = ["vendored"] }
+openssl-sys = "0.9"
+foreign-types = "0.3"
+rustls-native-certs = "0.8"
 
 [profile.release]
 codegen-units = 1
@@ -116,3 +122,7 @@ path = "../tests/integration/extern_proxy.rs"
 [[test]]
 name = "pgp"
 path = "../tests/integration/pgp.rs"
+
+[[test]]
+name = "smime"
+path = "../tests/integration/smime.rs"

@@ -1,0 +1,22 @@
+From: Bea Test <bea@example.org>
+To: Anna Test <anna@example.org>
+Subject: Unsicher rc2-40
+Date: Mon, 19 Oct 2026 10:00:00 +0200
+Message-ID: <rc2-40@example.org>
+MIME-Version: 1.0
+Content-Disposition: attachment; filename="smime.p7m"
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+
+MIICBAYJKoZIhvcNAQcDoIIB9TCCAfECAQAxggF3MIIBcwIBADBbMEMxGDAWBgNV
+BAoMD1NpY2hlck1haWwgVGVzdDEnMCUGA1UEAwweU2ljaGVyTWFpbCBUZXN0LVp3
+aXNjaGVuc3RlbGxlAhQ+c1UeMk08/niOgcPIstA9WqD6ejANBgkqhkiG9w0BAQEF
+AASCAQCYfeJm0Gj4Zdrd1z4mZ2FftKGlJHm0S8576HSs1Sk0aLzeuj5ycCes9Wcd
+ipa3WttdhpyrOOzwJI7NA/pzPn+W8AcoZxQsIh52tPs2UbtKBd99E7wqKPg/aD11
+9s27ZMgh+O4bd2RrJFhAa3WbqIkw6LdrA9v9qHc7tiDKmnwVyq9y2uM7XnBJ+SZv
+AC5vNpdqLs7Pk7IMdRIjOG+kDZkIO7ATRh0F/u+9tPGdKQHk+zAJexAHDZV2OoGJ
+b2wEWYsdrHUl3pFQX5eFGCUDZs+B1v4F05gKQyQf9x2JnerpOegDDI1WUHb+GMon
+bDJEThIzErw0MSsA94erVqwqBaL1MHEGCSqGSIb3DQEHATAaBggqhkiG9w0DAjAO
+AgIAoAQI4/UTecaSDCyASESJhwEfExR7vQEWtltJSTkx3/5CasylQDDnOi7qx/Vj
+LRRvGfV4UyuUN+F5mqYFj0s8gWkZPQCN5BXMqOKT+unlcYFOV9n90Q==
+

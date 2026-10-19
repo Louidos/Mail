@@ -17,6 +17,7 @@ SicherMail ist eine [Tauri-2](https://v2.tauri.app/)-Anwendung:
 | `speicher` | verschlüsselter lokaler Zwischenspeicher                          |
 | `anzeige`  | Mails parsen und HTML bereinigen                                  |
 | `pgp`      | OpenPGP: Schlüssel verwalten, Mails entschlüsseln und prüfen       |
+| `smime`    | S/MIME: Zertifikate verwalten, Mails entschlüsseln und prüfen      |
 | `tls`      | gemeinsame TLS-Regeln für IMAP und SMTP                           |
 | `befehle`  | Befehle, die das Frontend über `invoke` aufrufen darf             |
 
@@ -176,10 +177,53 @@ Aufbau:
   Schlüsselring. Rechenintensives (S2K, Entschlüsseln) läuft in `spawn_blocking`. `mail_anzeigen`,
   `anhang_speichern`, `mail_anhaenge_uebernehmen` und der Versand weitergeleiteter Anhänge verwenden die entschlüsselte
   Fassung; gespeichert wird immer nur die Rohmail vom Server.
-- Oberfläche: `src/schluessel/dialog.ts` (Schlüsselverwaltung), Statusleiste und Passphrase-Abfrage in
+- Oberfläche: `src/schluessel/dialog.ts` (Dialog „Schlüssel und Zertifikate“), Statusleiste und Passphrase-Abfrage in
   `src/postfach/lesen.ts`. Datei-Dialoge laufen im Backend; die Capabilities bleiben unverändert.
 - Die S2K-Schlüsselableitung ist ohne Optimierung sehr langsam; `Cargo.toml` optimiert deshalb `pgp` und die
   Hash-Crates auch im Dev-Profil (Tests).
+
+## S/MIME (`smime`)
+
+**Bibliothek: OpenSSL über das Crate `openssl`** (Apache-2.0), mit `vendored`. Gründe:
+
+- OpenSSL wird für SQLCipher (`rusqlite` mit `bundled-sqlcipher-vendored-openssl`) ohnehin schon mitkompiliert;
+  `openssl` nutzt genau diese statisch gelinkte Bibliothek (`openssl-sys` mit `vendored`). Es kommt keine
+  Systembibliothek zur Laufzeit dazu und keine zweite Kryptobibliothek.
+- Die reinen Rust-Crates von RustCrypto (`cms`, `x509-cert`, `der`, `pkcs12`) bilden die Formate ab, bieten aber kein
+  Entschlüsseln von CMS, keine Prüfung von Zertifikatsketten (Pfadaufbau, Zeitpunkt, Schlüsselzweck,
+  basicConstraints) und PKCS#12 nur als Datenstruktur. Das alles selbst zu bauen wäre fehleranfällig. OpenSSL deckt
+  PKCS#12, CMS (EnvelopedData, AuthEnvelopedData mit AES-GCM, SignedData) und `X509_verify_cert` seit Jahren
+  zuverlässig ab und ist die Grundlage vieler S/MIME-Programme.
+- RSA-Entschlüsselung (PKCS#1 v1.5) schützt OpenSSL 3 mit „implicit rejection“ gegen Bleichenbacher/Marvin; das
+  `rsa`-Crate (RUSTSEC-2023-0071) wird für S/MIME nicht verwendet.
+- Nicht in `openssl-sys` enthalten sind `CMS_get0_signers`, `CMS_get1_certs` und `X509_check_ca`; sie werden direkt
+  aus der mitgelieferten OpenSSL deklariert (kleine, kommentierte `unsafe`-Blöcke). Verfahren (Inhaltsverschlüsselung,
+  Hashfunktion), Empfänger und Signaturzeit, die OpenSSL nicht herausgibt, liest `smime::der` (BER wird vorher von
+  OpenSSL in DER umgewandelt).
+- Wurzeln des Betriebssystems liefert `rustls-native-certs` (Windows-Zertifikatsspeicher, macOS-Schlüsselbund,
+  unter Linux die Zertifikatsdateien der Distribution).
+
+Aufbau:
+
+- `zertifikat`: Zertifikate lesen (PEM, DER, PKCS#7 `.p7c`), beschreiben (SHA-256-Fingerabdruck, Name, Adressen aus
+  SAN `rfc822Name` bzw. Subject `E=`, Aussteller, Gültigkeit), Schlüsselzweck (KeyUsage, ExtendedKeyUsage
+  `emailProtection`) und Schlüsselstärke (RSA ab 2048 Bit, EC ab 256 Bit) prüfen, PKCS#12 importieren. Der private
+  Schlüssel wird als PKCS#8 mit der Passphrase geschützt (scrypt N=2^15, r=8, p=1 → AES-256-GCM, Format `SMK1`).
+- `speicher`: Tabellen `smime_eigene` (Konto, Zertifikat, Kette, geschützter Schlüssel), `smime_fremde` und
+  `smime_wurzeln` in `schluessel.db`. Sie werden beim Öffnen mit `CREATE TABLE IF NOT EXISTS` ergänzt; die Tabellen
+  von OpenPGP bleiben unverändert, alte Dateien öffnen weiter. OpenPGP und S/MIME teilen sich eine Verbindung
+  (`pgp::speicher::SchluesselDb`).
+- `lesen`: erkennt `application/pkcs7-mime` (auch `x-pkcs7-mime`; enveloped-data, authEnveloped-data, signed-data) und
+  `multipart/signed` mit `application/pkcs7-signature` (auch `x-pkcs7-signature`). Entschlüsselt mit `CMS_decrypt`
+  und dem Zertifikat des passenden Empfängers (Aussteller+Seriennummer oder Schlüssel-ID), nur AES-CBC und AES-GCM.
+  Signaturen: erst `CMS_verify` ohne Kettenprüfung (unverändert?), dann eigene Kettenprüfung mit `X509StoreContext`
+  gegen System- und übernommene Wurzeln, zum Signaturzeitpunkt (`signingTime`, höchstens jetzt) und mit Zweck
+  `smime_sign`, zuletzt Adressvergleich. Das Ergebnis steht im gemeinsamen `PgpStatus` mit `verfahren: smime`,
+  zusätzlichen `hinweise` und `zertifikat_uebernehmbar`; die Anzeige baut wie bei OpenPGP auf der Rohmail auf.
+- `SmimeDienst`: Verwaltung (Import, Wurzeln mit zweistufiger Bestätigung, Löschen, Entsperren), hält Passphrasen
+  nur im Arbeitsspeicher. `mail_anzeigen` fragt zuerst S/MIME, dann OpenPGP.
+- Oberfläche: Bereich „S/MIME-Zertifikate“ in `src/schluessel/smime.ts`, Statusleiste in `src/postfach/lesen.ts`
+  (gleicher Stil wie OpenPGP, Texte mit „S/MIME“ und „Zertifikat“).
 
 ## Design der Oberfläche
 

@@ -74,6 +74,9 @@ const einfacheMail = {
     signierer_schluessel: null,
     meldung: null,
     passphrase_fuer: null,
+    verfahren: "openpgp",
+    hinweise: [],
+    zertifikat_uebernehmbar: false,
   },
 };
 
@@ -296,6 +299,9 @@ describe("Leseansicht", () => {
       signierer_schluessel: null,
       meldung: null,
       passphrase_fuer: null,
+      verfahren: "openpgp",
+      hinweise: [],
+      zertifikat_uebernehmbar: false,
     },
   };
 
@@ -510,6 +516,90 @@ describe("Leseansicht", () => {
     await warten();
     expect(invoke).toHaveBeenCalledWith("pgp_aus_anhang_importieren", { konto: "k1", ordner: "INBOX", uid: 5, index: 0 });
     expect(wurzel.textContent).toContain("Importiert: Bea <bea@example.org>");
+  });
+
+  it("zeigt S/MIME-Ergebnisse mit Verfahren, Status und Hinweisen", async () => {
+    const smime = { ...pgpLeer, verfahren: "smime" };
+    const faelle: [Record<string, unknown>, string][] = [
+      [
+        { verschluesselung: "entschluesselt", signatur: "gueltig", signierer: "Bea Test <bea@example.org>" },
+        "Mit S/MIME signiert und gültig (Zertifikat von Bea Test <bea@example.org>)",
+      ],
+      [{ verschluesselung: "entschluesselt" }, "Verschlüsselt (S/MIME)"],
+      [{ signatur: "unbekannt", signierer_schluessel: "ABCD 1234" }, "von einer unbekannten Zertifizierungsstelle"],
+      [{ signatur: "abgelaufen" }, "Zertifikat war beim Signieren abgelaufen"],
+      [{ signatur: "andere_adresse" }, "das Zertifikat gehört nicht zur Absenderadresse"],
+      [{ signatur: "ungueltig" }, "Signatur ungültig"],
+      [{ signatur: "gueltig", signatur_teilweise: true }, "Nur ein Teil dieser Mail ist signiert"],
+      [{ verschluesselung: "teilweise" }, "Nur teilweise verschlüsselt"],
+      [{ signatur: "gueltig", hinweise: ["Sperrstatus nicht online geprüft"] }, "Sperrstatus nicht online geprüft"],
+    ];
+    for (const [pgp, text] of faelle) {
+      invoke.mockReset();
+      document.body.replaceChildren();
+      const { wurzel } = await oeffnen({ mail_anzeigen: { ...aufbereitet, pgp: { ...smime, ...pgp } } });
+      expect(wurzel.querySelector(".pgp-leiste")?.textContent).toContain(text);
+    }
+  });
+
+  it("markiert den CBC-Hinweis als Warnung", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        pgp: {
+          ...pgpLeer,
+          verfahren: "smime",
+          verschluesselung: "entschluesselt",
+          hinweise: ["Verschlüsselt, aber nicht gegen Veränderung geschützt (AES-CBC ohne gültige Signatur)."],
+        },
+      },
+    });
+    const zeilen = [...wurzel.querySelectorAll(".pgp-zeile")] as HTMLElement[];
+    const hinweis = zeilen.find((z) => z.textContent?.includes("nicht gegen Veränderung"));
+    expect(hinweis?.dataset.art).toBe("warnung");
+  });
+
+  it("übernimmt das S/MIME-Zertifikat aus einer gültig signierten Mail", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        pgp: { ...pgpLeer, verfahren: "smime", signatur: "gueltig", zertifikat_uebernehmbar: true },
+      },
+      smime_aus_mail_uebernehmen: {
+        fingerabdruck: "AAAA",
+        name: "Bea Test",
+        adressen: ["bea@example.org"],
+        aussteller: "Test-Stelle",
+        gueltig_ab: 0,
+        gueltig_bis: 2_000_000_000,
+        abgelaufen: false,
+      },
+    });
+    const knopf = [...wurzel.querySelectorAll(".pgp-leiste button")].find(
+      (k) => k.textContent === "Zertifikat übernehmen",
+    ) as HTMLButtonElement;
+    knopf.click();
+    await warten();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("smime_aus_mail_uebernehmen", { konto: "k1", ordner: "INBOX", uid: 5 });
+    expect(wurzel.textContent).toContain("Zertifikat übernommen: Bea Test (bea@example.org)");
+  });
+
+  it("entsperrt bei S/MIME das Zertifikat statt eines OpenPGP-Schlüssels", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        pgp: { ...pgpLeer, verfahren: "smime", verschluesselung: "nicht_entschluesselt", passphrase_fuer: "CCCC DDDD" },
+      },
+    });
+    const leiste = wurzel.querySelector(".pgp-leiste") as HTMLElement;
+    expect(leiste.textContent).toContain("Zertifikat CCCC DDDD");
+    expect(leiste.textContent).not.toContain("Zertifikat übernehmen");
+    (leiste.querySelector("[name=pgp_passphrase]") as HTMLInputElement).value = "test-passwort";
+    (leiste.querySelector("form") as HTMLFormElement).dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("smime_entsperren", { fingerabdruck: "CCCC DDDD", passphrase: "test-passwort" });
+    expect(invoke).not.toHaveBeenCalledWith("pgp_entsperren", expect.anything());
   });
 
   it("zeigt bei normalen Mails keine OpenPGP-Leiste", async () => {

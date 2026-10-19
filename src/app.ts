@@ -11,6 +11,7 @@ import {
   type MailKopf,
   type Ordner,
   type SendeErgebnis,
+  type Verfahren,
 } from "./api";
 import { bestaetigen } from "./dialoge";
 import { el } from "./dom";
@@ -98,7 +99,7 @@ export class App {
     hinzufuegen.addEventListener("click", () => kontoDialogOeffnen(null, () => void this.kontenLaden()));
     const einstellungen = el("button", { type: "button", class: "breit" }, "Einstellungen");
     einstellungen.addEventListener("click", () => void einstellungenOeffnen(() => void this.mailsLaden(false)));
-    const schluessel = el("button", { type: "button", class: "breit" }, "Schlüssel (OpenPGP)");
+    const schluessel = el("button", { type: "button", class: "breit" }, "Schlüssel und Zertifikate");
     schluessel.addEventListener("click", () => void schluesselOeffnen(this.zustand.konten));
     const seitenleiste = el(
       "aside",
@@ -307,16 +308,35 @@ export class App {
     await this.inhaltLaden(true);
   }
 
-  /** Entsperrt den eigenen Schlüssel und lädt die Mail neu (dann entschlüsselt). */
-  private async pgpEntsperren(fingerabdruck: string, passphrase: string): Promise<void> {
+  /** Entsperrt den eigenen Schlüssel bzw. das S/MIME-Zertifikat und lädt die Mail neu (dann entschlüsselt). */
+  private async pgpEntsperren(fingerabdruck: string, passphrase: string, verfahren: Verfahren): Promise<void> {
     try {
-      await api.pgpEntsperren(fingerabdruck, passphrase);
+      if (verfahren === "smime") {
+        await api.smimeEntsperren(fingerabdruck, passphrase);
+      } else {
+        await api.pgpEntsperren(fingerabdruck, passphrase);
+      }
       this.zustand.hinweis = null;
       await this.inhaltLaden(false);
     } catch (fehler) {
       this.zustand.hinweis = fehlertext(fehler);
       this.zeichnen();
     }
+  }
+
+  /** S/MIME: übernimmt das Zertifikat des Absenders der geöffneten (gültig signierten) Mail. */
+  private async zertifikatUebernehmen(): Promise<void> {
+    const { auswahl, offen } = this.zustand;
+    if (!auswahl || !offen) return;
+    try {
+      const info = await api.smimeAusMailUebernehmen(auswahl.konto, auswahl.ordner, offen.uid);
+      this.zustand.hinweis = `Zertifikat übernommen: ${info.name} (${info.adressen.join(", ")})`;
+      await this.inhaltLaden(false);
+      return;
+    } catch (fehler) {
+      this.zustand.hinweis = fehlertext(fehler);
+    }
+    this.zeichnen();
   }
 
   /** Importiert öffentliche Schlüssel aus einem Anhang der geöffneten Mail. */
@@ -581,7 +601,9 @@ export class App {
         absenderErlauben: (adresse) => void this.absenderErlauben(adresse),
         anhangSpeichern: (index) => void this.anhangSpeichern(index),
         linkKlick: (klick) => void this.linkKlick(klick),
-        pgpEntsperren: (fingerabdruck, passphrase) => void this.pgpEntsperren(fingerabdruck, passphrase),
+        pgpEntsperren: (fingerabdruck, passphrase, verfahren) =>
+          void this.pgpEntsperren(fingerabdruck, passphrase, verfahren),
+        zertifikatUebernehmen: () => void this.zertifikatUebernehmen(),
         schluesselImportieren: (index) => void this.schluesselAusAnhang(index),
       }),
     );

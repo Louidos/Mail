@@ -132,11 +132,15 @@ export interface Absenderpruefung {
 /** Zustand der Verschlüsselung (OpenPGP, #44). */
 export type PgpVerschluesselung = "keine" | "entschluesselt" | "nicht_entschluesselt" | "teilweise";
 
-/** Ergebnis der Signaturprüfung (OpenPGP). */
-export type PgpSignatur = "keine" | "unbekannt" | "ungueltig" | "andere_adresse" | "gueltig";
+/** Ergebnis der Signaturprüfung (OpenPGP und S/MIME; „abgelaufen“ nur bei S/MIME). */
+export type PgpSignatur = "keine" | "unbekannt" | "ungueltig" | "abgelaufen" | "andere_adresse" | "gueltig";
 
-/** Ergebnis von Entschlüsselung und Signaturprüfung. */
+/** Verfahren der Ende-zu-Ende-Verschlüsselung. */
+export type Verfahren = "openpgp" | "smime";
+
+/** Ergebnis von Entschlüsselung und Signaturprüfung (OpenPGP oder S/MIME). */
 export interface PgpStatus {
+  verfahren: Verfahren;
   verschluesselung: PgpVerschluesselung;
   signatur: PgpSignatur;
   /** Nur ein Teil der Mail ist signiert. */
@@ -146,8 +150,38 @@ export interface PgpStatus {
   /** Fingerabdruck bzw. Schlüssel-ID des Signaturschlüssels. */
   signierer_schluessel: string | null;
   meldung: string | null;
-  /** Fingerabdruck des eigenen Schlüssels, dessen Passphrase fehlt. */
+  /** Fingerabdruck des eigenen Schlüssels bzw. Zertifikats, dessen Passphrase fehlt. */
   passphrase_fuer: string | null;
+  /** Dezente Zusatzhinweise (S/MIME), z. B. „Sperrstatus nicht online geprüft“. */
+  hinweise: string[];
+  /** S/MIME: Das Zertifikat des Absenders kann übernommen werden. */
+  zertifikat_uebernehmbar: boolean;
+}
+
+/** Ein S/MIME-Zertifikat (#56, ohne geheime Teile). */
+export interface ZertifikatInfo {
+  /** SHA-256, in Vierergruppen. */
+  fingerabdruck: string;
+  name: string;
+  adressen: string[];
+  aussteller: string;
+  /** Unix-Zeit in Sekunden. */
+  gueltig_ab: number;
+  gueltig_bis: number;
+  abgelaufen: boolean;
+}
+
+export interface EigenesZertifikat extends ZertifikatInfo {
+  konto: string;
+  /** Passphrase in dieser Sitzung eingegeben. */
+  entsperrt: boolean;
+}
+
+export interface ZertifikatUebersicht {
+  eigene: EigenesZertifikat[];
+  fremde: ZertifikatInfo[];
+  /** Vom Nutzer übernommene Wurzelzertifikate. */
+  wurzeln: ZertifikatInfo[];
 }
 
 /** Ein OpenPGP-Schlüssel (ohne geheime Teile). */
@@ -300,4 +334,16 @@ export const api = {
   pgpEntsperren: (fingerabdruck: string, passphrase: string) =>
     invoke<void>("pgp_entsperren", { fingerabdruck, passphrase }),
   pgpVersandPruefen: (entwurf: Entwurf) => invoke<VersandPruefung>("pgp_versand_pruefen", { entwurf }),
+  smimeUebersicht: () => invoke<ZertifikatUebersicht>("smime_uebersicht"),
+  smimeEigenesImportieren: (konto: string, passwort: string) =>
+    invoke<ZertifikatInfo | null>("smime_eigenes_importieren", { konto, passwort }),
+  smimeFremdeImportieren: () => invoke<ZertifikatInfo[]>("smime_fremde_importieren"),
+  smimeAusMailUebernehmen: (konto: string, ordner: string, uid: number) =>
+    invoke<ZertifikatInfo>("smime_aus_mail_uebernehmen", { konto, ordner, uid }),
+  smimeWurzelLesen: () => invoke<ZertifikatInfo | null>("smime_wurzel_lesen"),
+  smimeWurzelBestaetigen: (fingerabdruck: string) =>
+    invoke<ZertifikatInfo>("smime_wurzel_bestaetigen", { fingerabdruck }),
+  smimeLoeschen: (fingerabdruck: string) => invoke<void>("smime_loeschen", { fingerabdruck }),
+  smimeEntsperren: (fingerabdruck: string, passphrase: string) =>
+    invoke<void>("smime_entsperren", { fingerabdruck, passphrase }),
 };

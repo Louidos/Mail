@@ -2,8 +2,8 @@ name: Pakete
 
 # Baut die Installationspakete für Windows, macOS und Linux (#48):
 # - aus dem Release-Workflow (`release.yml`) für genau den Commit des Releases,
-# - in Pull Requests, die diesen Workflow, den Release-Workflow oder die Tauri-Konfiguration
-#   ändern, damit der Bau schon vor dem Merge geprüft wird.
+# - in Pull Requests, die diesen Workflow, den Release-Workflow, die Tauri-Konfiguration oder die
+#   Rust-Abhängigkeiten ändern, damit der Bau schon vor dem Merge geprüft wird.
 # Die Pakete landen als Artefakte im Lauf; veröffentlicht werden sie nur von `release.yml`.
 #
 # Reproduzierbarkeit: gesperrte Lockfiles (`npm ci`, `cargo --locked`), Rust-Version aus
@@ -26,6 +26,8 @@ on:
       - .github/workflows/pakete.yml
       - .github/workflows/release.yml
       - src-tauri/tauri.conf.json
+      - src-tauri/Cargo.toml
+      - src-tauri/Cargo.lock
 
 permissions:
   contents: read
@@ -37,6 +39,8 @@ jobs:
   bauen:
     name: Pakete für ${{ matrix.system }}
     runs-on: ${{ matrix.runner }}
+    # Hängt ein Runner (z. B. bei npm ci), lieber abbrechen als stundenlang warten.
+    timeout-minutes: 90
     strategy:
       # Scheitert ein System, braucht es die anderen nicht: Ein Release gibt es nur mit allen.
       fail-fast: true
