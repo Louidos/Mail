@@ -20,15 +20,42 @@ function escape(text: string): string {
   return text.replace(/[&<>"']/g, (z) => `&#${z.charCodeAt(0)};`);
 }
 
+/** Farben der Mailanzeige; ohne Design (z. B. in Tests) die Systemfarben des Browsers. */
+export interface MailFarben {
+  hintergrund: string;
+  text: string;
+  link: string;
+}
+
+const SYSTEMFARBEN: MailFarben = { hintergrund: "Canvas", text: "CanvasText", link: "LinkText" };
+
+/**
+ * Liest die Farben aus den zentralen CSS-Variablen (`src/styles.css`). Das iframe ist ein
+ * eigenes Dokument und sieht die Variablen des Hauptfensters nicht; deshalb werden die
+ * Werte hier übernommen. Nur einfache Farbwerte werden akzeptiert.
+ */
+export function mailFarben(dokument: Document = document): MailFarben {
+  const stil = dokument.defaultView?.getComputedStyle(dokument.documentElement);
+  const lesen = (name: string, ersatz: string) => {
+    const wert = stil?.getPropertyValue(name).trim() ?? "";
+    return /^#[0-9a-f]{3,8}$/i.test(wert) ? wert : ersatz;
+  };
+  return {
+    hintergrund: lesen("--weiss", SYSTEMFARBEN.hintergrund),
+    text: lesen("--text", SYSTEMFARBEN.text),
+    link: lesen("--blau", SYSTEMFARBEN.link),
+  };
+}
+
 /** Vollständiges Dokument für das iframe (`srcdoc`). */
-export function mailDokument(bereinigtesHtml: string, titel: string): string {
+export function mailDokument(bereinigtesHtml: string, titel: string, farben: MailFarben = mailFarben()): string {
   return [
     "<!doctype html><html><head><meta charset=\"utf-8\">",
     `<meta http-equiv="Content-Security-Policy" content="${MAIL_CSP}">`,
     '<meta name="referrer" content="no-referrer">',
     `<title>${escape(titel)}</title>`,
-    "<style>html,body{margin:0;padding:0;background:#fff;color:#111;font-family:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-size:15px;line-height:1.45;overflow-wrap:anywhere}",
-    "body{padding:12px}img{max-width:100%;height:auto}table{max-width:100%}a{color:#0b57d0;cursor:pointer}pre{white-space:pre-wrap}</style>",
+    `<style>html,body{margin:0;padding:0;background:${farben.hintergrund};color:${farben.text};font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.5;overflow-wrap:anywhere}`,
+    `body{padding:16px}img{max-width:100%;height:auto}table{max-width:100%}a{color:${farben.link};cursor:pointer}pre{white-space:pre-wrap}</style>`,
     "</head><body>",
     bereinigtesHtml,
     "</body></html>",
