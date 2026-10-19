@@ -15,6 +15,7 @@ import {
 import { bestaetigen } from "./dialoge";
 import { el } from "./dom";
 import { einstellungenOeffnen } from "./einstellungen/dialog";
+import { schluesselOeffnen } from "./schluessel/dialog";
 import { verfassenOeffnen } from "./verfassen/dialog";
 import { entwuerfeOeffnen } from "./verfassen/entwuerfe";
 import { antwortEntwurf, leererEntwurf, weiterleitenEntwurf } from "./verfassen/zitat";
@@ -97,6 +98,8 @@ export class App {
     hinzufuegen.addEventListener("click", () => kontoDialogOeffnen(null, () => void this.kontenLaden()));
     const einstellungen = el("button", { type: "button", class: "breit" }, "Einstellungen");
     einstellungen.addEventListener("click", () => void einstellungenOeffnen(() => void this.mailsLaden(false)));
+    const schluessel = el("button", { type: "button", class: "breit" }, "Schlüssel (OpenPGP)");
+    schluessel.addEventListener("click", () => void schluesselOeffnen(this.zustand.konten));
     const seitenleiste = el(
       "aside",
       { class: "seitenleiste" },
@@ -104,6 +107,7 @@ export class App {
       neueMail,
       this.kontenBereich,
       hinzufuegen,
+      schluessel,
       einstellungen,
     );
     this.wurzel.replaceChildren(
@@ -301,6 +305,34 @@ export class App {
       this.zustand.hinweis = fehlertext(fehler);
     }
     await this.inhaltLaden(true);
+  }
+
+  /** Entsperrt den eigenen Schlüssel und lädt die Mail neu (dann entschlüsselt). */
+  private async pgpEntsperren(fingerabdruck: string, passphrase: string): Promise<void> {
+    try {
+      await api.pgpEntsperren(fingerabdruck, passphrase);
+      this.zustand.hinweis = null;
+      await this.inhaltLaden(false);
+    } catch (fehler) {
+      this.zustand.hinweis = fehlertext(fehler);
+      this.zeichnen();
+    }
+  }
+
+  /** Importiert öffentliche Schlüssel aus einem Anhang der geöffneten Mail. */
+  private async schluesselAusAnhang(index: number): Promise<void> {
+    const { auswahl, offen } = this.zustand;
+    if (!auswahl || !offen) return;
+    try {
+      const infos = await api.pgpAusAnhangImportieren(auswahl.konto, auswahl.ordner, offen.uid, index);
+      this.zustand.hinweis = `Importiert: ${infos.map((i) => i.benutzer_ids[0] ?? i.fingerabdruck).join(", ")}`;
+      // Signaturen lassen sich jetzt eventuell prüfen.
+      await this.inhaltLaden(false);
+      return;
+    } catch (fehler) {
+      this.zustand.hinweis = fehlertext(fehler);
+    }
+    this.zeichnen();
   }
 
   private async gelesenSetzen(mail: MailKopf, gelesen: boolean): Promise<void> {
@@ -549,6 +581,8 @@ export class App {
         absenderErlauben: (adresse) => void this.absenderErlauben(adresse),
         anhangSpeichern: (index) => void this.anhangSpeichern(index),
         linkKlick: (klick) => void this.linkKlick(klick),
+        pgpEntsperren: (fingerabdruck, passphrase) => void this.pgpEntsperren(fingerabdruck, passphrase),
+        schluesselImportieren: (index) => void this.schluesselAusAnhang(index),
       }),
     );
   }

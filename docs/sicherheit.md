@@ -7,7 +7,7 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 
 | Schutzgut | Bedrohung |
 | --- | --- |
-| **Zugangsdaten** (Passwörter, Schlüssel) | Mitlesen im Netz, Auslesen aus Dateien oder Logs, Weitergabe an Dritte |
+| **Zugangsdaten** (Passwörter, Schlüssel, private OpenPGP-Schlüssel und Passphrasen) | Mitlesen im Netz, Auslesen aus Dateien oder Logs, Weitergabe an Dritte |
 | **Mailinhalte** (unterwegs und auf dem Gerät) | Mitlesen oder Verändern im Netz (z. B. gefälschte Server), Lesen der lokalen Dateien bei Diebstahl oder Schadsoftware ohne Zugriff auf den Schlüsselbund |
 | **Privatsphäre beim Lesen** | Tracking-Pixel und externe Inhalte, die verraten, wann und wo eine Mail gelesen wurde |
 | **Rechner des Nutzers** | Skripte in Mails, gefälschte Links (Phishing), gefährliche Anhänge |
@@ -93,6 +93,32 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
   Pfade, keine Steuer-, Schreibrichtungs- oder unsichtbaren Zeichen (`Rechnung<U+202E>fdp.exe`), keine reservierten
   Windows-Namen.
 
+### Ende-zu-Ende-Verschlüsselung (OpenPGP)
+
+- Bibliothek: rPGP (`pgp`), reines Rust ohne Systembibliotheken (Begründung in der [Architektur](architektur.md)).
+- **Private Schlüssel** liegen nie im Klartext auf der Platte: in `schluessel.db`, vollständig verschlüsselt mit
+  SQLCipher; deren Schlüssel (32 Zufallsbytes) liegt nur im Schlüsselbund (`pgp:schluessel`). Zusätzlich ist jeder
+  private Schlüssel mit der Passphrase des Nutzers geschützt (S2K). Die Datei ist unabhängig von „Mails lokal speichern“;
+  „Lokalen Speicher leeren“ und das Ausschalten der lokalen Speicherung lassen sie unberührt. Fehlt der Schlüssel im
+  Schlüsselbund, wird die Datei nicht gelöscht, sondern beiseitegelegt (`schluessel.db.unlesbar-<Zeit>`).
+- **Passphrasen** werden nie gespeichert. Nach dem Entsperren bleiben sie höchstens bis zum Programmende im
+  Arbeitsspeicher (`zeroize`); neue Schlüssel brauchen mindestens 8 Zeichen. Geheimes (Passphrasen, private Schlüssel,
+  entschlüsselter Text) wird im Speicher mit `zeroize` gelöscht; rPGP löscht Schlüsselmaterial selbst.
+- **Neue Schlüssel**: Ed25519 (Signieren) und Cv25519 (Verschlüsseln) im v4-Format wie GnuPG.
+- **Import**: Eigene private Schlüssel nur mit richtiger Passphrase und nur, wenn eine User-ID zur Adresse des Kontos
+  passt; Eigensignaturen werden geprüft. Schlüsselserver und WKD werden nicht abgefragt – Schlüssel kommen nur aus
+  Dateien oder Mail-Anhängen. Das Frontend sieht nie einen privaten Schlüssel; Dateien wählt und speichert das Backend.
+- **Entschlüsseln**: nur integritätsgeschützte Formate (SEIPD mit MDC, SEIPDv2/AEAD, GnuPG-AEAD/OCB); ungeschützte
+  Altformate (SED) werden abgelehnt. Entschlüsselt wird nur, wenn die **ganze** Mail verschlüsselt ist (oberster
+  MIME-Teil `multipart/encrypted` bzw. der ganze Text bei Inline-PGP). Ein verschlüsselter Teil zwischen
+  unverschlüsselten Teilen wird nur als „teilweise verschlüsselt“ gekennzeichnet und nicht entschlüsselt (Schutz vor
+  EFAIL-ähnlichen Tricks). Höchstens 64 MB Klartext (Schutz vor Kompressionsbomben).
+- Der **Klartext** wird nie gespeichert: Im lokalen Speicher liegt nur die verschlüsselte Fassung. Entschlüsselter
+  Inhalt läuft durch dieselbe sichere Anzeige (ammonia, abgeschottetes iframe, externe Inhalte blockiert).
+- **Signaturen** gelten nur als gültig, wenn eine User-ID des Schlüssels zur Absenderadresse passt; sonst steht ein
+  deutlicher Hinweis. Unbekannte Schlüssel, ungültige (veränderte) Signaturen und nur teilweise signierte Mails
+  werden ausdrücklich so gekennzeichnet. Bei PGP/MIME wird über die kanonische Form (CRLF) geprüft.
+
 ### Tauri und Oberfläche
 
 - Strenge CSP im Hauptfenster: nur eigene Skripte, keine Remote-URLs, keine Formulare, keine fremden Frames.
@@ -124,15 +150,25 @@ wird nur auf Wunsch des Nutzers und nur die eine Mail (`UID EXPUNGE`).
 
 ## Bekannte Hinweise aus `cargo audit`
 
-`cargo audit` meldet derzeit keine Sicherheitslücken, aber Warnungen zu indirekten Abhängigkeiten des
+**Bewusste Ausnahme** (in `src-tauri/.cargo/audit.toml`): RUSTSEC-2023-0071 im Crate `rsa` („Marvin Attack“). Die
+RSA-Entschlüsselung läuft nicht in konstanter Zeit; ausnutzbar ist das nur, wenn ein Angreifer die Rechenzeit vieler
+Entschlüsselungen messen kann, etwa über das Netz. `rsa` kommt über rPGP, das RSA-Schlüssel anderer lesen können muss.
+SicherMail entschlüsselt nur lokal auf Wunsch des Nutzers und gibt keine zeitabhängige Rückmeldung nach aussen; neu
+erzeugte Schlüssel sind Ed25519/Cv25519. Das Advisory selbst nennt lokale Nutzung als unbedenklich. Eine behobene
+Version gibt es noch nicht; die Ausnahme wird entfernt, sobald es sie gibt.
+
+Sonst meldet `cargo audit` derzeit keine Sicherheitslücken, aber Warnungen zu indirekten Abhängigkeiten des
 Tauri-/GTK-Unterbaus unter Linux (z. B. `glib` „unsound“ in `VariantStrIter`, nicht mehr gepflegte `zvariant`,
 `zbus_names`, `proc-macro-error`). SicherMail verwendet die betroffenen Funktionen nicht direkt. Die Warnungen
 verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 
 ## Was bewusst nicht abgedeckt ist
 
-- **Keine Ende-zu-Ende-Verschlüsselung** (OpenPGP, S/MIME): Mails liegen auf dem Server so, wie der Server sie
-  speichert. Kommt später in einem eigenen Auftrag.
+- **Verschlüsseln beim Senden** folgt in einem zweiten Schritt (#44); bis dahin liest SicherMail OpenPGP nur
+  (entschlüsseln und prüfen). S/MIME wird nicht unterstützt.
+- **OpenPGP-Schlüsselverwaltung ohne Vertrauensnetz**: Ablauf und Widerruf von Schlüsseln werden nicht ausgewertet,
+  Beglaubigungen (Web of Trust) nicht geprüft. Ob ein Schlüssel wirklich der Person gehört, muss der Nutzer über den
+  Fingerabdruck selbst prüfen.
 - **Keine eigene Absenderprüfung**: DKIM, SPF und DMARC prüft SicherMail nicht selbst (keine DNS-Abfragen), sondern
   zeigt nur das Ergebnis des eigenen Servers. Ohne dieses Ergebnis bleibt ein Absender „nicht geprüft“ und kann
   gefälscht sein.

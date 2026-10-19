@@ -104,8 +104,8 @@ Getestet wird nie gegen echte Postfächer.
 
 | Ordner                | Inhalt                                                                                         |
 | --------------------- | ---------------------------------------------------------------------------------------------- |
-| `src/`                | Frontend (TypeScript, Vite, ohne Framework): `konto/` (Konto einrichten), `postfach/` (Mailliste und Leseansicht), `verfassen/` (Schreiben, Antworten, Entwürfe), `einstellungen/` |
-| `src-tauri/`          | Rust-Backend (Tauri 2); Module in `src-tauri/src/`: `konto`, `imap`, `smtp`, `speicher`, `anzeige`, dazu `tls` und `befehle` |
+| `src/`                | Frontend (TypeScript, Vite, ohne Framework): `konto/` (Konto einrichten), `postfach/` (Mailliste und Leseansicht), `verfassen/` (Schreiben, Antworten, Entwürfe), `einstellungen/`, `schluessel/` (OpenPGP-Schlüssel) |
+| `src-tauri/`          | Rust-Backend (Tauri 2); Module in `src-tauri/src/`: `konto`, `imap`, `smtp`, `speicher`, `anzeige`, `pgp`, dazu `tls` und `befehle` |
 | `public/`             | statische Dateien (Icons)                                                                      |
 | `tests/`              | Frontend-Tests (Vitest)                                                                        |
 | `tests/integration/`  | Rust-Integrationstests, u. a. gegen den Test-Mailserver (je Datei ein `[[test]]` in `src-tauri/Cargo.toml`) |

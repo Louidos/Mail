@@ -6,6 +6,7 @@
 //! - `smtp`: Mails senden
 //! - `speicher`: verschlüsselter lokaler Zwischenspeicher (SQLCipher)
 //! - `anzeige`: Mails sicher zur Anzeige aufbereiten
+//! - `pgp`: OpenPGP-Schlüssel verwalten, Mails entschlüsseln und Signaturen prüfen
 //! - `tls`: gemeinsame TLS-Regeln (nur rustls, mindestens TLS 1.2, Zertifikate immer geprüft)
 
 pub mod anzeige;
@@ -15,6 +16,7 @@ pub mod einstellungen;
 pub mod fehler;
 pub mod imap;
 pub mod konto;
+pub mod pgp;
 pub mod smtp;
 pub mod speicher;
 pub mod tls;
@@ -55,7 +57,11 @@ pub fn run() {
             let imap = Arc::new(ImapDienst::neu(konten.clone(), cache));
             imap.vorladen_setzen(lokal_speichern && speicher_hinweis.is_none());
             let beobachter = Arc::new(Beobachter::default());
-            let senden = Arc::new(smtp::dienst::SendeDienst::neu(konten.clone(), imap.clone()));
+            // OpenPGP-Schlüssel: eigener verschlüsselter Speicher, unabhängig vom Mailspeicher.
+            let pgp = Arc::new(pgp::PgpDienst::neu(&ordner, schluesselbund.clone()));
+            let senden = Arc::new(
+                smtp::dienst::SendeDienst::neu(konten.clone(), imap.clone()).mit_pgp(pgp.clone()),
+            );
             let griff = app.handle().clone();
             let melder: Melder = Arc::new(move |ereignis| {
                 let _ = griff.emit(MAIL_EREIGNIS, ereignis);
@@ -82,6 +88,7 @@ pub fn run() {
                 einstellungen,
                 senden,
                 schluesselbund,
+                pgp,
                 datenordner: ordner,
                 speicher_hinweis: std::sync::Mutex::new(speicher_hinweis),
             });
@@ -114,6 +121,14 @@ pub fn run() {
             befehle::entwurf_speichern,
             befehle::entwuerfe_auflisten,
             befehle::entwurf_loeschen,
+            befehle::pgp_uebersicht,
+            befehle::pgp_erzeugen,
+            befehle::pgp_eigenen_importieren,
+            befehle::pgp_oeffentliche_importieren,
+            befehle::pgp_aus_anhang_importieren,
+            befehle::pgp_exportieren,
+            befehle::pgp_loeschen,
+            befehle::pgp_entsperren,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");

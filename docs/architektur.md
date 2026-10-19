@@ -16,6 +16,7 @@ SicherMail ist eine [Tauri-2](https://v2.tauri.app/)-Anwendung:
 | `smtp`     | Mails senden                                                      |
 | `speicher` | verschlüsselter lokaler Zwischenspeicher                          |
 | `anzeige`  | Mails parsen und HTML bereinigen                                  |
+| `pgp`      | OpenPGP: Schlüssel verwalten, Mails entschlüsseln und prüfen       |
 | `tls`      | gemeinsame TLS-Regeln für IMAP und SMTP                           |
 | `befehle`  | Befehle, die das Frontend über `invoke` aufrufen darf             |
 
@@ -131,6 +132,42 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 - **Entwürfe** liegen im Zwischenspeicher (`MailCache`): in SQLCipher (`entwuerfe`) oder im Arbeitsspeicher.
   Anhänge werden mit ihrer Quelle gespeichert und beim Laden neu ins Register eingetragen. „Lokalen Speicher leeren“
   lässt Entwürfe stehen; beim Umschalten des Speichers werden sie übernommen.
+
+## OpenPGP (`pgp`)
+
+**Bibliothek: rPGP** (Crate `pgp`, MIT/Apache-2.0). Gründe:
+
+- Reines Rust ohne Systembibliotheken (Standard-Feature `bzip2` abgeschaltet): baut unter Windows, macOS und Linux
+  ohne zusätzliche Abhängigkeiten. Sequoia-PGP bräuchte für die Kryptografie Nettle oder OpenSSL als
+  Systembibliothek (die reine Rust-Variante gilt dort als experimentell), GPGME bräuchte eine installierte GnuPG.
+- Unterstützt RFC 9580 und RFC 4880 inkl. Ed25519/Cv25519, RSA anderer, AEAD und das AEAD-Format von GnuPG 2.4
+  (OCB), mit dem GnuPG an eigene GnuPG-Schlüssel verschlüsselt; wird u. a. von Delta Chat verwendet.
+- Niedrige Ebene: Semantik (Ablauf, Widerruf, Vertrauen) setzt rPGP bewusst nicht um; SicherMail prüft Eigensignaturen
+  beim Import und verlangt für „gültig“ die passende User-ID.
+- `cargo audit`: Über rPGP kommt `rsa` mit RUSTSEC-2023-0071 (siehe [Sicherheit](sicherheit.md#bekannte-hinweise-aus-cargo-audit)).
+
+Aufbau:
+
+- `schluessel`: Erzeugen (v4, Ed25519 primär zum Zertifizieren und Signieren, Cv25519-Unterschlüssel zum
+  Verschlüsseln, Passphrase-geschützt), Einlesen (armored oder binär, Eigensignaturen geprüft), Infos (Fingerabdruck,
+  User-IDs, Adressen), Passphrase prüfen.
+- `speicher`: `schluessel.db` (SQLCipher, Schlüssel im Schlüsselbund unter `pgp:schluessel`) mit den Tabellen
+  `eigene` (Konto, Fingerabdruck, privater Schlüssel armored und S2K-geschützt) und `fremde` (öffentliche Schlüssel).
+  Der Öffner für SQLCipher (`speicher::verschluesselt_oeffnen`) wird mit dem Mailspeicher geteilt.
+- `lesen`: erkennt `multipart/encrypted`, `multipart/signed` (RFC 3156) und Inline-PGP; entschlüsselt mit
+  `Message::decrypt_the_ring` (GnuPG-AEAD erlaubt, SED nicht), prüft eingebettete Signaturen
+  (`verify_nested_explicit`), abgetrennte Signaturen (`DetachedSignature`) über die CRLF-kanonische Form des ersten
+  Teils und Klartextsignaturen. Ergebnis: `PgpStatus` (Verschlüsselung, Signatur, Signierer, Meldung, ggf.
+  Fingerabdruck, dessen Passphrase fehlt) und eine anzeigbare Fassung (äussere Kopfzeilen ohne `Content-*` plus
+  entschlüsselte innere MIME-Entität).
+- `PgpDienst`: öffnet den Speicher beim ersten Zugriff, hält Passphrasen nur im Arbeitsspeicher und baut daraus den
+  Schlüsselring. Rechenintensives (S2K, Entschlüsseln) läuft in `spawn_blocking`. `mail_anzeigen`,
+  `anhang_speichern`, `mail_anhaenge_uebernehmen` und der Versand weitergeleiteter Anhänge verwenden die entschlüsselte
+  Fassung; gespeichert wird immer nur die Rohmail vom Server.
+- Oberfläche: `src/schluessel/dialog.ts` (Schlüsselverwaltung), Statusleiste und Passphrase-Abfrage in
+  `src/postfach/lesen.ts`. Datei-Dialoge laufen im Backend; die Capabilities bleiben unverändert.
+- Die S2K-Schlüsselableitung ist ohne Optimierung sehr langsam; `Cargo.toml` optimiert deshalb `pgp` und die
+  Hash-Crates auch im Dev-Profil (Tests).
 
 ## Design der Oberfläche
 

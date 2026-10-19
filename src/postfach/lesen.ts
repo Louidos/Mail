@@ -1,5 +1,15 @@
 /** Leseansicht: Kopfdaten, Aktionen und sicher dargestellter Inhalt einer Mail. */
-import type { Absenderpruefung, AbsenderStufe, Adresse, AufbereiteteMail, MailKopf, Ordner, PruefMethode } from "../api";
+import type {
+  Absenderpruefung,
+  AbsenderStufe,
+  Adresse,
+  Anhang,
+  AufbereiteteMail,
+  MailKopf,
+  Ordner,
+  PgpStatus,
+  PruefMethode,
+} from "../api";
 import { el } from "../dom";
 import { datumLang, groesse } from "./format";
 import { linksAbfangen, mailRahmenMitLinks, textMitLinks, type LinkKlick } from "./sicher";
@@ -15,6 +25,10 @@ export interface LeseAktionen {
   absenderErlauben: (adresse: string) => void;
   anhangSpeichern: (index: number) => void;
   linkKlick: (klick: LinkKlick) => void;
+  /** Passphrase für den eigenen Schlüssel eingeben (bis zum Programmende). */
+  pgpEntsperren: (fingerabdruck: string, passphrase: string) => void;
+  /** Öffentlichen Schlüssel aus einem Anhang importieren. */
+  schluesselImportieren: (index: number) => void;
 }
 
 /** Zustand des Inhalts der geöffneten Mail. */
@@ -89,6 +103,116 @@ export function absenderFeld(pruefung: Absenderpruefung): HTMLDetailsElement {
   );
 }
 
+/** Ist der Anhang wahrscheinlich ein öffentlicher OpenPGP-Schlüssel? */
+export function istSchluesselAnhang(anhang: Anhang): boolean {
+  return anhang.typ.toLowerCase() === "application/pgp-keys" || /\.(asc|pub|key)$/i.test(anhang.name);
+}
+
+interface PgpZeile {
+  art: "gut" | "neutral" | "warnung";
+  symbol: string;
+  text: string;
+}
+
+/** Texte für das Ergebnis von Entschlüsselung und Signaturprüfung – immer mit Symbol und Text. */
+export function pgpZeilen(pgp: PgpStatus): PgpZeile[] {
+  const zeilen: PgpZeile[] = [];
+  switch (pgp.verschluesselung) {
+    case "entschluesselt":
+      zeilen.push({ art: "gut", symbol: "🔒", text: "Verschlüsselt" });
+      break;
+    case "nicht_entschluesselt":
+      zeilen.push({ art: "warnung", symbol: "🔒", text: "Kann nicht entschlüsselt werden" });
+      break;
+    case "teilweise":
+      zeilen.push({ art: "warnung", symbol: "⚠", text: "Nur teilweise verschlüsselt" });
+      break;
+  }
+  const von = pgp.signierer ? ` (Schlüssel von ${pgp.signierer})` : "";
+  switch (pgp.signatur) {
+    case "gueltig":
+      zeilen.push({ art: "gut", symbol: "✓", text: `Signiert und gültig${von}` });
+      break;
+    case "andere_adresse":
+      zeilen.push({
+        art: "warnung",
+        symbol: "⚠",
+        text: `Signatur gültig, aber der Schlüssel gehört nicht zur Absenderadresse${von}`,
+      });
+      break;
+    case "ungueltig":
+      zeilen.push({
+        art: "warnung",
+        symbol: "✗",
+        text: "Signatur ungültig – die Mail wurde nach dem Signieren verändert oder die Signatur ist beschädigt",
+      });
+      break;
+    case "unbekannt":
+      zeilen.push({
+        art: "neutral",
+        symbol: "?",
+        text: `Signiert, Schlüssel unbekannt${pgp.signierer_schluessel ? ` (${pgp.signierer_schluessel})` : ""}`,
+      });
+      break;
+  }
+  if (pgp.signatur !== "keine" && pgp.signatur_teilweise) {
+    zeilen.push({
+      art: "warnung",
+      symbol: "⚠",
+      text: "Nur ein Teil dieser Mail ist signiert. Was ausserhalb steht, kann von jemand anderem stammen.",
+    });
+  }
+  return zeilen;
+}
+
+/** Leiste mit dem OpenPGP-Ergebnis; fragt bei Bedarf nach der Passphrase. */
+function pgpLeiste(pgp: PgpStatus, aktionen: LeseAktionen): HTMLElement | null {
+  const zeilen = pgpZeilen(pgp);
+  if (zeilen.length === 0) return null;
+  const teile: Node[] = zeilen.map((z) =>
+    el(
+      "div",
+      { class: "pgp-zeile", "data-art": z.art },
+      el("span", { class: "symbol", "aria-hidden": "true" }, z.symbol),
+      z.text,
+    ),
+  );
+  if (pgp.meldung) teile.push(el("p", { class: "pgp-meldung" }, pgp.meldung));
+  if (pgp.passphrase_fuer) {
+    const fingerabdruck = pgp.passphrase_fuer;
+    const feld = el("input", {
+      type: "password",
+      name: "pgp_passphrase",
+      autocomplete: "off",
+      "aria-label": "Passphrase deines Schlüssels",
+      placeholder: "Passphrase",
+    });
+    const knopf = el("button", { type: "submit", class: "klein haupt" }, "Entsperren");
+    const formular = el(
+      "form",
+      { class: "pgp-entsperren" },
+      el("span", { class: "leise" }, `Schlüssel ${fingerabdruck}`),
+      feld,
+      knopf,
+    );
+    formular.addEventListener("submit", (ereignis) => {
+      ereignis.preventDefault();
+      const passphrase = feld.value;
+      feld.value = "";
+      if (passphrase) aktionen.pgpEntsperren(fingerabdruck, passphrase);
+    });
+    teile.push(
+      formular,
+      el(
+        "p",
+        { class: "leise" },
+        "Die Passphrase wird nicht gespeichert, sondern nur bis zum Beenden von SicherMail im Arbeitsspeicher gehalten.",
+      ),
+    );
+  }
+  return el("section", { class: "pgp-leiste", "aria-label": "Verschlüsselung und Signatur" }, ...teile);
+}
+
 function inhaltBereich(
   inhalt: Inhalt,
   optionen: LeseOptionen,
@@ -155,6 +279,11 @@ function inhaltBereich(
     for (const anhang of mail.anhaenge) {
       const speichern = el("button", { type: "button", class: "klein" }, "Speichern unter …");
       speichern.addEventListener("click", () => aktionen.anhangSpeichern(anhang.index));
+      let importieren: HTMLButtonElement | null = null;
+      if (istSchluesselAnhang(anhang)) {
+        importieren = el("button", { type: "button", class: "klein" }, "Schlüssel importieren");
+        importieren.addEventListener("click", () => aktionen.schluesselImportieren(anhang.index));
+      }
       liste.append(
         el(
           "li",
@@ -162,6 +291,7 @@ function inhaltBereich(
           el("span", { class: "anhang-name" }, anhang.name),
           el("span", { class: "leise" }, `${anhang.typ}, ${groesse(anhang.groesse)}`),
           speichern,
+          importieren,
         ),
       );
     }
@@ -263,6 +393,7 @@ export function leseansicht(
       : null,
     el("h2", { class: "betreff" }, mail?.betreff || kopf.betreff || "(kein Betreff)"),
     el("dl", { class: "kopfdaten" }, ...kopfdaten),
+    mail?.pgp ? pgpLeiste(mail.pgp, aktionen) : null,
     inhaltBereich(inhalt, optionen, aktionen),
   );
 }

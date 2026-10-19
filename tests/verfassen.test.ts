@@ -47,6 +47,15 @@ const mail: AufbereiteteMail = {
     spf: null,
     dmarc: null,
   },
+  pgp: {
+    verschluesselung: "keine",
+    signatur: "keine",
+    signatur_teilweise: false,
+    signierer: null,
+    signierer_schluessel: null,
+    meldung: null,
+    passphrase_fuer: null,
+  },
 };
 
 describe("Antworten und Weiterleiten", () => {

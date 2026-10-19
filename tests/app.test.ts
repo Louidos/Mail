@@ -66,6 +66,15 @@ const einfacheMail = {
     spf: null,
     dmarc: null,
   },
+  pgp: {
+    verschluesselung: "keine",
+    signatur: "keine",
+    signatur_teilweise: false,
+    signierer: null,
+    signierer_schluessel: null,
+    meldung: null,
+    passphrase_fuer: null,
+  },
 };
 
 /** Antworten des Backends je Befehl. */
@@ -279,6 +288,15 @@ describe("Leseansicht", () => {
       spf: { ergebnis: "pass", domain: "example.org", passend: true },
       dmarc: { ergebnis: "pass", domain: "example.org", passend: true },
     },
+    pgp: {
+      verschluesselung: "keine",
+      signatur: "keine",
+      signatur_teilweise: false,
+      signierer: null,
+      signierer_schluessel: null,
+      meldung: null,
+      passphrase_fuer: null,
+    },
   };
 
   const gefaelscht = {
@@ -418,5 +436,85 @@ describe("Leseansicht", () => {
     const knoepfe = [...wurzel.querySelectorAll(".extern-leiste button")].map((k) => k.textContent);
     expect(knoepfe).toEqual(["Externe Inhalte laden"]);
     expect(wurzel.textContent).not.toContain("immer erlauben");
+  });
+
+  const pgpLeer = einfacheMail.pgp;
+
+  it("zeigt entschlüsselte und gültig signierte Mails deutlich an", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        pgp: { ...pgpLeer, verschluesselung: "entschluesselt", signatur: "gueltig", signierer: "Bea <bea@example.org>" },
+      },
+    });
+    const leiste = wurzel.querySelector(".pgp-leiste") as HTMLElement;
+    expect(leiste.textContent).toContain("Verschlüsselt");
+    expect(leiste.textContent).toContain("Signiert und gültig (Schlüssel von Bea <bea@example.org>)");
+  });
+
+  it("kennzeichnet ungültige, fremde, unbekannte und teilweise Signaturen", async () => {
+    const faelle: [Record<string, unknown>, string][] = [
+      [{ signatur: "ungueltig" }, "Signatur ungültig"],
+      [{ signatur: "unbekannt", signierer_schluessel: "ABCD 1234" }, "Schlüssel unbekannt (ABCD 1234)"],
+      [{ signatur: "andere_adresse", signierer: "Carl <carl@example.org>" }, "gehört nicht zur Absenderadresse"],
+      [{ signatur: "gueltig", signatur_teilweise: true }, "Nur ein Teil dieser Mail ist signiert"],
+      [{ verschluesselung: "teilweise", meldung: "Nur ein Teil" }, "Nur teilweise verschlüsselt"],
+    ];
+    for (const [pgp, text] of faelle) {
+      invoke.mockReset();
+      document.body.replaceChildren();
+      const { wurzel } = await oeffnen({ mail_anzeigen: { ...aufbereitet, pgp: { ...pgpLeer, ...pgp } } });
+      expect(wurzel.querySelector(".pgp-leiste")?.textContent).toContain(text);
+    }
+  });
+
+  it("fragt bei verschlüsselten Mails nach der Passphrase und lädt danach neu", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        pgp: {
+          ...pgpLeer,
+          verschluesselung: "nicht_entschluesselt",
+          meldung: "Zum Entschlüsseln wird die Passphrase deines Schlüssels benötigt.",
+          passphrase_fuer: "AAAA BBBB",
+        },
+      },
+      pgp_entsperren: undefined,
+    });
+    const leiste = wurzel.querySelector(".pgp-leiste") as HTMLElement;
+    expect(leiste.textContent).toContain("Kann nicht entschlüsselt werden");
+    const feld = leiste.querySelector("[name=pgp_passphrase]") as HTMLInputElement;
+    expect(feld.type).toBe("password");
+    feld.value = "geheime-passphrase";
+    (leiste.querySelector("form") as HTMLFormElement).dispatchEvent(new Event("submit", { cancelable: true }));
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("pgp_entsperren", { fingerabdruck: "AAAA BBBB", passphrase: "geheime-passphrase" });
+    expect(feld.value).toBe("");
+    const aufrufe = invoke.mock.calls.filter(([befehl]) => befehl === "mail_anzeigen");
+    expect(aufrufe.length).toBe(2);
+  });
+
+  it("bietet bei Schlüssel-Anhängen den Import an", async () => {
+    const { wurzel } = await oeffnen({
+      mail_anzeigen: {
+        ...aufbereitet,
+        anhaenge: [{ index: 0, name: "bea.asc", typ: "application/pgp-keys", groesse: 900 }],
+      },
+      pgp_aus_anhang_importieren: [{ fingerabdruck: "AAAA", benutzer_ids: ["Bea <bea@example.org>"], adressen: [], erstellt: 0, kann_verschluesseln: true }],
+    });
+    const knopf = [...wurzel.querySelectorAll(".anhaenge button")].find(
+      (k) => k.textContent === "Schlüssel importieren",
+    ) as HTMLButtonElement;
+    knopf.click();
+    await warten();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("pgp_aus_anhang_importieren", { konto: "k1", ordner: "INBOX", uid: 5, index: 0 });
+    expect(wurzel.textContent).toContain("Importiert: Bea <bea@example.org>");
+  });
+
+  it("zeigt bei normalen Mails keine OpenPGP-Leiste", async () => {
+    const { wurzel } = await oeffnen();
+    expect(wurzel.querySelector(".pgp-leiste")).toBeNull();
+    expect(wurzel.textContent).not.toContain("Schlüssel importieren");
   });
 });

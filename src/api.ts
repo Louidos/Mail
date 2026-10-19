@@ -128,6 +128,49 @@ export interface Absenderpruefung {
   dmarc: PruefMethode | null;
 }
 
+/** Zustand der Verschlüsselung (OpenPGP, #44). */
+export type PgpVerschluesselung = "keine" | "entschluesselt" | "nicht_entschluesselt" | "teilweise";
+
+/** Ergebnis der Signaturprüfung (OpenPGP). */
+export type PgpSignatur = "keine" | "unbekannt" | "ungueltig" | "andere_adresse" | "gueltig";
+
+/** Ergebnis von Entschlüsselung und Signaturprüfung. */
+export interface PgpStatus {
+  verschluesselung: PgpVerschluesselung;
+  signatur: PgpSignatur;
+  /** Nur ein Teil der Mail ist signiert. */
+  signatur_teilweise: boolean;
+  /** User-ID des Signaturschlüssels. */
+  signierer: string | null;
+  /** Fingerabdruck bzw. Schlüssel-ID des Signaturschlüssels. */
+  signierer_schluessel: string | null;
+  meldung: string | null;
+  /** Fingerabdruck des eigenen Schlüssels, dessen Passphrase fehlt. */
+  passphrase_fuer: string | null;
+}
+
+/** Ein OpenPGP-Schlüssel (ohne geheime Teile). */
+export interface SchluesselInfo {
+  fingerabdruck: string;
+  benutzer_ids: string[];
+  adressen: string[];
+  /** Unix-Zeit in Sekunden. */
+  erstellt: number;
+  kann_verschluesseln: boolean;
+}
+
+export interface EigenerSchluessel extends SchluesselInfo {
+  konto: string;
+  geschuetzt: boolean;
+  /** Passphrase in dieser Sitzung eingegeben (oder nicht nötig). */
+  entsperrt: boolean;
+}
+
+export interface SchluesselUebersicht {
+  eigene: EigenerSchluessel[];
+  fremde: SchluesselInfo[];
+}
+
 /** Vom Backend bereinigte Mail. */
 export interface AufbereiteteMail {
   betreff: string;
@@ -145,6 +188,7 @@ export interface AufbereiteteMail {
   extern_geladen: boolean;
   anhaenge: Anhang[];
   absender_pruefung: Absenderpruefung;
+  pgp: PgpStatus;
 }
 
 export interface Einstellungen {
@@ -228,4 +272,15 @@ export const api = {
   entwurfSpeichern: (entwurf: Entwurf) => invoke<Entwurf>("entwurf_speichern", { entwurf }),
   entwuerfeAuflisten: (konto: string) => invoke<Entwurf[]>("entwuerfe_auflisten", { konto }),
   entwurfLoeschen: (id: string) => invoke<void>("entwurf_loeschen", { id }),
+  pgpUebersicht: () => invoke<SchluesselUebersicht>("pgp_uebersicht"),
+  pgpErzeugen: (konto: string, passphrase: string) => invoke<SchluesselInfo>("pgp_erzeugen", { konto, passphrase }),
+  pgpEigenenImportieren: (konto: string, passphrase: string) =>
+    invoke<SchluesselInfo | null>("pgp_eigenen_importieren", { konto, passphrase }),
+  pgpOeffentlicheImportieren: () => invoke<SchluesselInfo[]>("pgp_oeffentliche_importieren"),
+  pgpAusAnhangImportieren: (konto: string, ordner: string, uid: number, index: number) =>
+    invoke<SchluesselInfo[]>("pgp_aus_anhang_importieren", { konto, ordner, uid, index }),
+  pgpExportieren: (fingerabdruck: string) => invoke<string | null>("pgp_exportieren", { fingerabdruck }),
+  pgpLoeschen: (fingerabdruck: string) => invoke<void>("pgp_loeschen", { fingerabdruck }),
+  pgpEntsperren: (fingerabdruck: string, passphrase: string) =>
+    invoke<void>("pgp_entsperren", { fingerabdruck, passphrase }),
 };

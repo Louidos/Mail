@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use tokio::time::timeout;
+use zeroize::Zeroizing;
 
 use super::anhaenge::{datei_lesen_begrenzt, AnhangRegister, Quelle, MAX_GESAMT};
 use super::entwurf::{aus_speicherform, speicherform, Entwurf};
@@ -11,6 +12,8 @@ use super::nachricht::{self, AnhangDaten};
 use crate::fehler::{Fehlermeldung, VerbindungsFehler};
 use crate::imap::dienst::ImapDienst;
 use crate::konto::KontoVerwaltung;
+use crate::pgp::lesen::Verschluesselung;
+use crate::pgp::PgpDienst;
 use crate::tls::VERBINDUNGS_ZEITLIMIT;
 
 /// Ergebnis eines erfolgreichen Versands.
@@ -25,6 +28,8 @@ pub struct SendeErgebnis {
 pub struct SendeDienst {
     konten: Arc<KontoVerwaltung>,
     imap: Arc<ImapDienst>,
+    /// Zum Entschlüsseln weitergeleiteter Anhänge aus verschlüsselten Mails.
+    pgp: Option<Arc<PgpDienst>>,
     pub register: AnhangRegister,
 }
 
@@ -33,8 +38,39 @@ impl SendeDienst {
         Self {
             konten,
             imap,
+            pgp: None,
             register: AnhangRegister::default(),
         }
+    }
+
+    /// Mit OpenPGP: Anhänge verschlüsselter Mails werden aus dem Klartext übernommen.
+    pub fn mit_pgp(mut self, pgp: Arc<PgpDienst>) -> Self {
+        self.pgp = Some(pgp);
+        self
+    }
+
+    /// Die Mail mit Anhängen so, wie sie angezeigt wird (bei OpenPGP entschlüsselt).
+    async fn mail_lesbar(
+        &self,
+        konto: &str,
+        ordner: &str,
+        uid: u32,
+    ) -> Result<Zeroizing<Vec<u8>>, Fehlermeldung> {
+        let roh = self.imap.inhalt(konto, ordner, uid).await?;
+        let Some(pgp) = self.pgp.clone() else {
+            return Ok(Zeroizing::new(roh));
+        };
+        let kopie = roh.clone();
+        let verarbeitet = tokio::task::spawn_blocking(move || pgp.verarbeiten(&kopie))
+            .await
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler beim Entschlüsseln."))?;
+        if verarbeitet.status.verschluesselung == Verschluesselung::NichtEntschluesselt {
+            return Err(Fehlermeldung::neu(
+                "pgp",
+                "Die Anhänge der weitergeleiteten Mail können nicht entschlüsselt werden.",
+            ));
+        }
+        Ok(verarbeitet.roh.unwrap_or_else(|| Zeroizing::new(roh)))
     }
 
     /// Sendet einen Entwurf. Schlägt das Senden fehl, wird der Entwurf gespeichert,
@@ -91,7 +127,7 @@ impl SendeDienst {
                     uid,
                     index,
                 } => {
-                    let roh = self.imap.inhalt(konto, ordner, *uid).await?;
+                    let roh = self.mail_lesbar(konto, ordner, *uid).await?;
                     crate::anzeige::anhang_inhalt(&roh, *index)?.1
                 }
             };

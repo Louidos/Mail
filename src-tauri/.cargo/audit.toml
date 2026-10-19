@@ -1,0 +1,15 @@
+# Einstellungen für `cargo audit` (läuft in src-tauri/, lokal und in der CI).
+#
+# Jede Ausnahme braucht eine Begründung und steht auch in docs/sicherheit.md.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 (rsa, „Marvin Attack“): Die RSA-Entschlüsselung ist nicht in konstanter Zeit.
+    # Ausnutzbar nur, wenn ein Angreifer die Rechenzeit vieler Entschlüsselungen messen kann, z. B.
+    # über das Netz. SicherMail entschlüsselt nur lokal auf Wunsch des Nutzers und gibt keine
+    # zeitabhängige Rückmeldung nach aussen; neu erzeugte Schlüssel sind Ed25519/Cv25519 (kein RSA).
+    # Das Advisory selbst nennt lokale Nutzung als unbedenklich. Es gibt keine behobene Version;
+    # `rsa` kommt über die OpenPGP-Bibliothek `pgp` (rPGP), die RSA-Schlüssel anderer lesen muss.
+    # Entfernen, sobald eine behobene Version erscheint.
+    "RUSTSEC-2023-0071",
+]
