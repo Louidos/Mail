@@ -62,7 +62,15 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
   `data:`-Adressen ein. Die Anzeige selbst baut nie Verbindungen auf. Adressen im eigenen Netz (localhost, private
   und Link-Local-Adressen, Namen ohne Punkt) werden nie geladen – auch nicht über Weiterleitungen, DNS oder einen
   Proxy. Weil ein Proxy Namen selbst auflöst und diese Prüfung so umgehen würde, verbindet sich SicherMail für externe
-  Bilder immer direkt und benutzt nie einen im System eingestellten Proxy (`HTTPS_PROXY` usw.).
+  Bilder standardmässig immer direkt und benutzt nie einen im System eingestellten Proxy (`HTTPS_PROXY` usw.).
+- **Proxy für externe Bilder** (Einstellung, standardmässig aus): Wer nur über einen Proxy ins Internet kommt, kann eine
+  eigene Proxy-Adresse eintragen (nur `http://` oder `https://` mit Server und Port, ohne Zugangsdaten; ungültige
+  Adressen werden abgelehnt, dann bleiben Bilder blockiert). Dann geht jede Bildanfrage – auch Weiterleitungen – nur
+  über diese Adresse, nie über System- oder Umgebungs-Proxys. Weiterhin gilt: nur HTTPS, gleiche Grössen-, Anzahl- und
+  Zeitgrenzen; IP-Adressen aus dem eigenen Netz (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, ::1, fc00::/7,
+  fe80::/10 …), `localhost` und Namen ohne Punkt werden abgelehnt, bevor sie den Proxy erreichen. **Grenze:** Normale
+  Namen löst der Proxy selbst auf. Zeigt ein solcher Name auf eine Adresse im eigenen Netz, kann SicherMail das nicht
+  mehr erkennen. Der Einstellungsdialog sagt das deutlich.
 - Die Freigabe „für diesen Absender immer erlauben“ hängt an der Absenderadresse, die gefälscht sein kann; die
   Oberfläche weist darauf hin.
 - Links öffnen sich erst nach einem Klick im Standardbrowser (nur `https:`, `http:`, `mailto:`). Weicht der angezeigte
@@ -86,7 +94,8 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 ### Keine Telemetrie
 
 SicherMail baut nur Verbindungen auf zu den vom Nutzer eingetragenen Servern, zur Domain der eigenen Adresse
-(Autoconfig, nur auf Klick) und zu externen Bildquellen (nur auf ausdrücklichen Wunsch). Es gibt keine Telemetrie,
+(Autoconfig, nur auf Klick) und zu externen Bildquellen (nur auf ausdrücklichen Wunsch, ggf. über den selbst
+eingetragenen Proxy). Es gibt keine Telemetrie,
 keine Absturzberichte und keine Update-Abfragen.
 
 ### Mails auf dem Server
@@ -119,7 +128,9 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 - **Metadaten**: Server und Netzbetreiber sehen, wann und mit welchem Server verbunden wird.
 - **Anhänge** werden nicht auf Schadsoftware geprüft.
 - **Nur IMAP/SMTP**: kein POP3, kein Exchange/EWS.
-- **Externe Bilder ohne Proxy**: Wer nur über einen Proxy ins Internet kommt, kann externe Bilder nicht laden.
+- **Externe Bilder über einen Proxy**: Standardmässig nie. Mit der Einstellung „Proxy für externe Bilder verwenden“
+  löst der Proxy Namen selbst auf; dass ein Name auf eine Adresse im eigenen Netz zeigt, lässt sich dann nicht mehr
+  ausschliessen. SOCKS-Proxys und Proxys mit Anmeldung werden nicht unterstützt.
 - Server, die nur veraltete TLS-Versionen (unter 1.2) können, werden nicht unterstützt.
 - **Hinterlegte Zertifikate** (Pinning) werden genau so akzeptiert, wie sie hinterlegt wurden; Ablaufdatum und
   Hostname des hinterlegten Zertifikats werden nicht zusätzlich geprüft. Läuft es ab, sollte es ersetzt werden.

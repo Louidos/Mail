@@ -73,6 +73,8 @@ impl AppZustand {
 pub struct EinstellungenAnsicht {
     pub lokal_speichern: bool,
     pub externe_inhalte_erlaubt: Vec<String>,
+    pub proxy_externe_bilder: bool,
+    pub proxy_adresse: String,
     pub speicher_hinweis: Option<String>,
 }
 
@@ -223,8 +225,12 @@ pub async fn mail_anzeigen(
     if !extern_laden && !zustand.einstellungen.extern_erlaubt(&absender).await {
         return Ok(mail);
     }
+    // Ein eingeschalteter, aber ungültiger Proxy lädt nichts: Bilder bleiben blockiert.
+    let Ok(proxy) = zustand.einstellungen.bilder_proxy().await else {
+        return Ok(mail);
+    };
     let adressen = anzeige::externe_adressen(&roh)?;
-    let geladen = extern_inhalte::bilder_laden(&adressen).await;
+    let geladen = extern_inhalte::bilder_laden(&adressen, proxy.as_ref()).await;
     anzeige::aufbereiten(&roh, Some(&geladen))
 }
 
@@ -334,6 +340,8 @@ pub async fn einstellungen_laden(
     Ok(EinstellungenAnsicht {
         lokal_speichern: einstellungen.lokal_speichern,
         externe_inhalte_erlaubt: einstellungen.externe_inhalte_erlaubt,
+        proxy_externe_bilder: einstellungen.proxy_externe_bilder,
+        proxy_adresse: einstellungen.proxy_adresse,
         speicher_hinweis: zustand.speicher_hinweis.lock().ok().and_then(|h| h.clone()),
     })
 }
@@ -386,6 +394,16 @@ pub async fn absender_extern_entfernen(
     adresse: String,
 ) -> Result<(), Fehlermeldung> {
     zustand.einstellungen.extern_entfernen(&adresse).await
+}
+
+/// Schaltet den Proxy für externe Bilder ein (nur mit gültiger Adresse) oder aus (#46).
+#[tauri::command]
+pub async fn proxy_setzen(
+    zustand: State<'_, AppZustand>,
+    an: bool,
+    adresse: String,
+) -> Result<(), Fehlermeldung> {
+    zustand.einstellungen.proxy_setzen(an, &adresse).await
 }
 
 /// Öffnet den Dialog „Datei anhängen“ (im Backend) und trägt die Dateien ins Register ein.

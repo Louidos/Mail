@@ -7,9 +7,22 @@ const { einstellungenOeffnen } = await import("../src/einstellungen/dialog");
 
 const warten = () => new Promise((r) => setTimeout(r, 0));
 
-function backend(einstellungen: { lokal_speichern: boolean; externe_inhalte_erlaubt: string[]; speicher_hinweis: string | null }) {
-  invoke.mockImplementation((befehl: string) => {
-    if (befehl === "einstellungen_laden") return Promise.resolve(einstellungen);
+interface TestEinstellungen {
+  lokal_speichern: boolean;
+  externe_inhalte_erlaubt: string[];
+  speicher_hinweis: string | null;
+  proxy_externe_bilder?: boolean;
+  proxy_adresse?: string;
+}
+
+function backend(einstellungen: TestEinstellungen, proxyFehler: string | null = null) {
+  invoke.mockImplementation((befehl: string, argumente?: { an?: boolean }) => {
+    if (befehl === "einstellungen_laden") {
+      return Promise.resolve({ proxy_externe_bilder: false, proxy_adresse: "", ...einstellungen });
+    }
+    if (befehl === "proxy_setzen" && argumente?.an && proxyFehler) {
+      return Promise.reject({ art: "eingabe", meldung: proxyFehler });
+    }
     return Promise.resolve(undefined);
   });
 }
@@ -74,5 +87,60 @@ describe("Einstellungen", () => {
     knopf(dialog, "Entfernen").click();
     await warten();
     expect(invoke).toHaveBeenCalledWith("absender_extern_entfernen", { adresse: "bea@example.org" });
+  });
+
+  it("hat den Proxy für externe Bilder standardmässig aus und zeigt die Einschränkung", async () => {
+    backend({ lokal_speichern: true, externe_inhalte_erlaubt: [], speicher_hinweis: null });
+    const dialog = await einstellungenOeffnen(() => {});
+    const schalter = dialog.querySelector("[name=proxy_externe_bilder]") as HTMLInputElement;
+    const adresse = dialog.querySelector("[name=proxy_adresse]") as HTMLInputElement;
+    expect(schalter.checked).toBe(false);
+    expect(adresse.disabled).toBe(true);
+    expect(knopf(dialog, "Proxy übernehmen").disabled).toBe(true);
+    expect(dialog.textContent).toContain("Proxy für externe Bilder verwenden");
+    expect(dialog.textContent).toContain(
+      "Der Proxy löst Adressen selbst auf. SicherMail kann dann nicht mehr vollständig verhindern, dass Bilder aus deinem eigenen Netz geladen werden.",
+    );
+  });
+
+  it("speichert den Proxy erst mit Adresse und schaltet ihn wieder aus", async () => {
+    backend({ lokal_speichern: true, externe_inhalte_erlaubt: [], speicher_hinweis: null });
+    const dialog = await einstellungenOeffnen(() => {});
+    const schalter = dialog.querySelector("[name=proxy_externe_bilder]") as HTMLInputElement;
+    const adresse = dialog.querySelector("[name=proxy_adresse]") as HTMLInputElement;
+    schalter.checked = true;
+    schalter.dispatchEvent(new Event("change"));
+    await warten();
+    expect(adresse.disabled).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("proxy_setzen", expect.anything());
+
+    adresse.value = " http://proxy.example.org:3128 ";
+    knopf(dialog, "Proxy übernehmen").click();
+    await warten();
+    expect(invoke).toHaveBeenCalledWith("proxy_setzen", { an: true, adresse: "http://proxy.example.org:3128" });
+    expect(dialog.querySelector(".status")?.getAttribute("data-art")).toBe("erfolg");
+
+    schalter.checked = false;
+    schalter.dispatchEvent(new Event("change"));
+    await warten();
+    expect(adresse.disabled).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("proxy_setzen", { an: false, adresse: "http://proxy.example.org:3128" });
+  });
+
+  it("meldet eine ungültige Proxy-Adresse deutlich", async () => {
+    backend(
+      { lokal_speichern: true, externe_inhalte_erlaubt: [], speicher_hinweis: null, proxy_externe_bilder: true, proxy_adresse: "" },
+      "Ungültige Proxy-Adresse.",
+    );
+    const dialog = await einstellungenOeffnen(() => {});
+    const adresse = dialog.querySelector("[name=proxy_adresse]") as HTMLInputElement;
+    expect(adresse.disabled).toBe(false);
+    adresse.value = "http://anna:geheim@proxy.example.org:3128";
+    knopf(dialog, "Proxy übernehmen").click();
+    await warten();
+    const status = dialog.querySelector(".status")!;
+    expect(status.getAttribute("data-art")).toBe("fehler");
+    expect(status.textContent).toContain("Ungültige Proxy-Adresse.");
+    expect(status.textContent).toContain("Externe Bilder bleiben blockiert.");
   });
 });

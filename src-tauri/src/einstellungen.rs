@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::anzeige::extern_inhalte::ProxyAdresse;
 use crate::fehler::Fehlermeldung;
 
 /// Gespeicherte Einstellungen.
@@ -16,6 +17,14 @@ pub struct Einstellungen {
     /// Absender (kleingeschrieben), bei denen externe Inhalte immer geladen werden.
     #[serde(default)]
     pub externe_inhalte_erlaubt: Vec<String>,
+    /// Externe Bilder über einen eigenen Proxy laden (#46). Standard: aus – dann nie über einen
+    /// Proxy, auch nicht über `HTTPS_PROXY` usw.
+    #[serde(default)]
+    pub proxy_externe_bilder: bool,
+    /// Proxy-Adresse (`http://host:port` oder `https://host:port`), nur wirksam mit
+    /// `proxy_externe_bilder`. Wird beim Setzen geprüft.
+    #[serde(default)]
+    pub proxy_adresse: String,
 }
 
 fn standard_an() -> bool {
@@ -27,6 +36,8 @@ impl Default for Einstellungen {
         Self {
             lokal_speichern: true,
             externe_inhalte_erlaubt: Vec::new(),
+            proxy_externe_bilder: false,
+            proxy_adresse: String::new(),
         }
     }
 }
@@ -86,6 +97,31 @@ impl EinstellungsSpeicher {
                 .contains(&absender)
     }
 
+    /// Proxy für externe Bilder, falls eingeschaltet und gültig. `Err`, wenn er eingeschaltet,
+    /// aber die Adresse ungültig ist (dann werden keine Bilder geladen).
+    pub async fn bilder_proxy(&self) -> Result<Option<ProxyAdresse>, Fehlermeldung> {
+        let einstellungen = self.laden().await;
+        if !einstellungen.proxy_externe_bilder {
+            return Ok(None);
+        }
+        ProxyAdresse::pruefen(&einstellungen.proxy_adresse).map(Some)
+    }
+
+    /// Schaltet den Proxy für externe Bilder ein oder aus. Beim Einschalten muss die Adresse
+    /// gültig sein, sonst wird nichts gespeichert.
+    pub async fn proxy_setzen(&self, an: bool, adresse: &str) -> Result<(), Fehlermeldung> {
+        let adresse = adresse.trim();
+        if an {
+            ProxyAdresse::pruefen(adresse)?;
+        }
+        self.aendern(|e| {
+            e.proxy_externe_bilder = an;
+            e.proxy_adresse = adresse.to_string();
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Nimmt einen Absender aus der Liste „externe Inhalte immer erlauben“.
     pub async fn extern_entfernen(&self, absender: &str) -> Result<(), Fehlermeldung> {
         let absender = absender.trim().to_lowercase();
@@ -137,6 +173,66 @@ mod tests {
                 .await
                 .lokal_speichern
         );
+    }
+
+    #[tokio::test]
+    async fn proxy_ist_standardmaessig_aus_und_alte_dateien_laden() {
+        let ordner = tempfile::tempdir().unwrap();
+        // Datei einer älteren Version ohne die Proxy-Felder
+        std::fs::write(
+            ordner.path().join("einstellungen.json"),
+            r#"{"lokal_speichern":false,"externe_inhalte_erlaubt":["anna@example.org"]}"#,
+        )
+        .unwrap();
+        let speicher = EinstellungsSpeicher::neu(ordner.path());
+        let geladen = speicher.laden().await;
+        assert!(!geladen.lokal_speichern);
+        assert_eq!(geladen.externe_inhalte_erlaubt, vec!["anna@example.org"]);
+        assert!(!geladen.proxy_externe_bilder);
+        assert!(geladen.proxy_adresse.is_empty());
+        assert_eq!(speicher.bilder_proxy().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn proxy_nur_mit_gueltiger_adresse() {
+        let ordner = tempfile::tempdir().unwrap();
+        let speicher = EinstellungsSpeicher::neu(ordner.path());
+        assert!(speicher
+            .proxy_setzen(true, "http://anna:geheim@proxy.example.org:3128")
+            .await
+            .is_err());
+        assert!(!speicher.laden().await.proxy_externe_bilder);
+
+        speicher
+            .proxy_setzen(true, " http://proxy.example.org:3128 ")
+            .await
+            .unwrap();
+        let neu = EinstellungsSpeicher::neu(ordner.path());
+        assert_eq!(
+            neu.bilder_proxy().await.unwrap().unwrap().als_text(),
+            "http://proxy.example.org:3128/"
+        );
+
+        // Ausschalten behält die Adresse, nutzt sie aber nicht mehr.
+        speicher
+            .proxy_setzen(false, "http://proxy.example.org:3128")
+            .await
+            .unwrap();
+        assert_eq!(speicher.bilder_proxy().await.unwrap(), None);
+        assert_eq!(
+            speicher.laden().await.proxy_adresse,
+            "http://proxy.example.org:3128"
+        );
+
+        // Von Hand verdorbene Datei: eingeschaltet, aber ungültig → keine Bilder.
+        speicher
+            .aendern(|e| {
+                e.proxy_externe_bilder = true;
+                e.proxy_adresse = "socks5://x:1".into();
+            })
+            .await
+            .unwrap();
+        assert!(speicher.bilder_proxy().await.is_err());
     }
 
     #[tokio::test]

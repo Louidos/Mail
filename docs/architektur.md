@@ -84,7 +84,10 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   und gezählt.
 - **Externe Inhalte** lädt auf Wunsch das Backend (`extern_inhalte`): nur HTTPS, nur Bilder, höchstens
   5 MB je Bild und 40 Bilder, ohne Cookies und Referer; eingesetzt als `data:`-Adressen.
-  Erlaubte Absender stehen in `einstellungen.json`.
+  Erlaubte Absender stehen in `einstellungen.json`. Standardmässig `no_proxy()` und ein eigener DNS-Resolver, der nur
+  öffentliche Adressen zulässt. Ist „Proxy für externe Bilder verwenden“ eingeschaltet (`proxy_externe_bilder`,
+  `proxy_adresse`), gehen alle Anfragen über `reqwest::Proxy::all` mit genau dieser geprüften Adresse (`ProxyAdresse`);
+  vorher werden Ziele mit IP-Adressen aus dem eigenen Netz und lokale Namen abgelehnt.
 - **Anzeige** im Frontend (`src/postfach/sicher.ts`): `iframe` mit `sandbox="allow-same-origin"` (also ohne
   `allow-scripts`, Formulare, Popups und Navigation des Hauptfensters) und eigener CSP
   `default-src 'none'; img-src data:; style-src 'unsafe-inline'`. Links im iframe werden vom Hauptfenster
