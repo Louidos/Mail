@@ -51,8 +51,12 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 
 - **Zwei Verbindungen pro Konto**: eine für Befehle der Oberfläche (`dienst`, wird wiederverwendet und bei
   Abbruch einmal automatisch neu aufgebaut) und eine zum Beobachten des Posteingangs (`beobachter`).
-- **Beobachter**: IMAP IDLE (alle 25 Minuten erneuert), sonst NOOP und Abgleich alle 2 Minuten. Bei Abbruch
-  neu verbinden mit wachsender Wartezeit (1 s bis 5 min). Die Oberfläche erfährt über das Ereignis
+  COPY und APPEND werden nach einem Abbruch nicht wiederholt, sobald sie gesendet wurden (sonst könnten Mails
+  doppelt entstehen); vorher wird die Verbindung mit `SELECT` bzw. `NOOP` geprüft.
+- **Beobachter**: IMAP IDLE, alle 2 Minuten erneuert (eine still abgerissene Verbindung fällt so spätestens
+  dann auf), danach Abgleich. Ohne IDLE – oder wenn der Server IDLE wiederholt ablehnt – NOOP und Abgleich
+  alle 2 Minuten. Bei Abbruch neu verbinden mit wachsender Wartezeit (1 s bis 5 min); zurückgesetzt wird sie
+  erst nach einem erfolgreichen Abgleich. Die Oberfläche erfährt über das Ereignis
   `mail-ereignis` von Änderungen (`mails_geaendert`, `verbunden`, `getrennt`).
 - **Abgleich** (`sync`): Ordner auswählen; ändert sich UIDVALIDITY, wird der lokale Stand verworfen.
   Neue Mails: `UID FETCH <höchste bekannte UID + 1>:*`. Bekannte Mails: Markierungen abgleichen, was

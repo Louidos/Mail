@@ -1,6 +1,8 @@
 //! IMAP-Befehle für die Oberfläche, mit einer wiederverwendeten Verbindung pro Konto.
 //!
-//! Bricht eine Verbindung ab, wird einmal automatisch neu verbunden und der Befehl wiederholt.
+//! Bricht eine Verbindung ab, wird einmal automatisch neu verbunden und der Befehl wiederholt –
+//! ausser bei Befehlen, die beim Wiederholen doppelte Mails erzeugen könnten (COPY, APPEND),
+//! sobald sie gesendet wurden.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -140,6 +142,18 @@ impl ImapDienst {
         konto_id: &str,
         befehl: impl for<'a> Fn(&'a mut ImapSitzung) -> Zukunft<'a, T>,
     ) -> Result<T, SyncFehler> {
+        self.ausfuehren_mit(konto_id, &AtomicBool::new(false), befehl)
+            .await
+    }
+
+    /// Wie [`ImapDienst::ausfuehren`]. Setzt der Befehl `gesendet`, bevor die Verbindung
+    /// abbricht, wird er nicht wiederholt: Der Server hat ihn womöglich schon ausgeführt.
+    async fn ausfuehren_mit<T: Send>(
+        &self,
+        konto_id: &str,
+        gesendet: &AtomicBool,
+        befehl: impl for<'a> Fn(&'a mut ImapSitzung) -> Zukunft<'a, T>,
+    ) -> Result<T, SyncFehler> {
         let platz = self.platz(konto_id);
         let mut sitzung = platz.lock().await;
         let mut versuch = 0;
@@ -162,7 +176,10 @@ impl ImapDienst {
                     // Nach jedem Fehler die Sitzung verwerfen: Sie könnte noch unvollständig
                     // gelesene Antworten enthalten und darf so nicht weiterverwendet werden.
                     *sitzung = None;
-                    if versuch >= 2 || !fehler.neu_verbinden_sinnvoll() {
+                    if versuch >= 2
+                        || !fehler.neu_verbinden_sinnvoll()
+                        || gesendet.load(Ordering::SeqCst)
+                    {
                         return Err(fehler.into());
                     }
                 }
@@ -448,10 +465,17 @@ impl ImapDienst {
             }
         };
         let inhalt = Arc::new(inhalt.to_vec());
-        self.ausfuehren(konto_id, move |s| {
+        let gesendet = Arc::new(AtomicBool::new(false));
+        let merker = gesendet.clone();
+        self.ausfuehren_mit(konto_id, &gesendet, move |s| {
             let ziel = ziel.clone();
             let inhalt = inhalt.clone();
+            let merker = merker.clone();
             Box::pin(async move {
+                // Erst prüfen, ob die Verbindung noch steht (darf wiederholt werden) …
+                s.noop().await.map_err(fehler_einordnen)?;
+                // … danach nicht mehr: Ein wiederholtes APPEND legt die Mail doppelt ab.
+                merker.store(true, Ordering::SeqCst);
                 s.append(&ziel, Some("(\\Seen)"), None, inhalt.as_slice())
                     .await
                     .map_err(fehler_einordnen)?;
@@ -511,9 +535,12 @@ impl ImapDienst {
         }
         let ordner_name = ordner.to_string();
         let ziel_name = ziel.to_string();
-        self.ausfuehren(konto_id, move |s| {
+        let gesendet = Arc::new(AtomicBool::new(false));
+        let merker = gesendet.clone();
+        self.ausfuehren_mit(konto_id, &gesendet, move |s| {
             let ordner = ordner_name.clone();
             let ziel = ziel_name.clone();
+            let merker = merker.clone();
             Box::pin(async move {
                 s.select(&ordner).await.map_err(fehler_einordnen)?;
                 let faehigkeiten = s.capabilities().await.map_err(fehler_einordnen)?;
@@ -522,6 +549,8 @@ impl ImapDienst {
                         .await
                         .map_err(fehler_einordnen)?;
                 } else {
+                    // Ein wiederholtes COPY legt die Mail doppelt im Ziel ab.
+                    merker.store(true, Ordering::SeqCst);
                     s.uid_copy(uid.to_string(), &ziel)
                         .await
                         .map_err(fehler_einordnen)?;
