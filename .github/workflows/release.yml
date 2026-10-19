@@ -136,6 +136,14 @@ jobs:
       - name: Pakete prüfen und Prüfsummen erzeugen
         run: |
           cd pakete
+          # Artefakte mit mehreren Pfaden behalten Unterordner (deb/, rpm/, msi/ …): flach zusammenlegen.
+          find . -mindepth 2 -type f -exec mv -n -t . {} +
+          find . -mindepth 1 -type d -empty -delete
+          if [ -n "$(find . -mindepth 1 -type d)" ]; then
+            echo "Doppelte Paketnamen oder unerwartete Ordner:" >&2
+            find . -mindepth 1 >&2
+            exit 1
+          fi
           for muster in '*.deb' '*.rpm' '*.AppImage' '*.msi' '*-setup.exe' '*.dmg'; do
             # shellcheck disable=SC2086 # Muster soll aufgelöst werden
             ls $muster >/dev/null 2>&1 || { echo "Paket $muster fehlt" >&2; exit 1; }
