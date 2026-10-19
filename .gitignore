@@ -1,0 +1,27 @@
+# Abhängigkeiten und Build-Ausgaben
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+coverage/
+
+# Geheimnisse – nie committen, nur Beispieldateien (*.example)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+!tests/**/*.example.pem
+
+# Test-Mailserver (wird von scripts/test-mailserver.sh erzeugt)
+.testserver/
+
+# Editor und Betriebssystem
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.log

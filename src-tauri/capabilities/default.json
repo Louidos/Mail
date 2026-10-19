@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimale Rechte für das Hauptfenster: nur Ereignisse empfangen. Kein Shell-, Dateisystem- oder Netzwerkzugriff aus dem Frontend.",
+  "windows": ["main"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

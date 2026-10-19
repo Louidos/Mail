@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sicherheitslücke melden
+    url: https://github.com/Louidos/Mail/security/advisories/new
+    about: Sicherheitslücken bitte privat melden (siehe SECURITY.md).
