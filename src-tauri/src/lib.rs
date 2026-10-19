@@ -4,6 +4,8 @@
 //! - `konto`: Konten mit eigenem IMAP-/SMTP-Server, Passwörter im Schlüsselbund
 //! - `imap`: Mails empfangen (IDLE, Synchronisation über UIDs)
 //! - `smtp`: Mails senden
+//! - `speicher`: verschlüsselter lokaler Zwischenspeicher (SQLCipher)
+//! - `anzeige`: Mails sicher zur Anzeige aufbereiten
 //! - `tls`: gemeinsame TLS-Regeln (nur rustls, mindestens TLS 1.2, Zertifikate immer geprüft)
 
 pub mod anzeige;
@@ -14,6 +16,7 @@ pub mod fehler;
 pub mod imap;
 pub mod konto;
 pub mod smtp;
+pub mod speicher;
 pub mod tls;
 
 use std::sync::Arc;
@@ -23,9 +26,8 @@ use tauri::{Emitter, Manager};
 use befehle::AppZustand;
 use einstellungen::EinstellungsSpeicher;
 use imap::beobachter::{Beobachter, Melder};
-use imap::cache::SpeicherCache;
 use imap::dienst::ImapDienst;
-use konto::schluesselbund::SystemSchluesselbund;
+use konto::schluesselbund::{Schluesselbund, SystemSchluesselbund};
 use konto::KontoVerwaltung;
 
 /// Name des Ereignisses, über das die Oberfläche von neuen Mails erfährt.
@@ -42,14 +44,16 @@ pub fn run() {
         .setup(|app| {
             let ordner = app.path().app_data_dir()?;
             std::fs::create_dir_all(&ordner)?;
-            let konten = Arc::new(KontoVerwaltung::neu(
-                &ordner,
-                Arc::new(SystemSchluesselbund),
-            ));
-            let imap = Arc::new(ImapDienst::neu(
-                konten.clone(),
-                Arc::new(SpeicherCache::default()),
-            ));
+            let schluesselbund: Arc<dyn Schluesselbund> = Arc::new(SystemSchluesselbund);
+            let konten = Arc::new(KontoVerwaltung::neu(&ordner, schluesselbund.clone()));
+            let einstellungen = Arc::new(EinstellungsSpeicher::neu(&ordner));
+            let lokal_speichern =
+                tauri::async_runtime::block_on(einstellungen.laden()).lokal_speichern;
+            // Verschlüsselter Speicher (Standard) oder nur Arbeitsspeicher.
+            let (cache, speicher_hinweis) =
+                AppZustand::speicher_einrichten(&ordner, schluesselbund.as_ref(), lokal_speichern);
+            let imap = Arc::new(ImapDienst::neu(konten.clone(), cache));
+            imap.vorladen_setzen(lokal_speichern && speicher_hinweis.is_none());
             let beobachter = Arc::new(Beobachter::default());
             let griff = app.handle().clone();
             let melder: Melder = Arc::new(move |ereignis| {
@@ -74,7 +78,10 @@ pub fn run() {
                 imap,
                 beobachter,
                 melder,
-                einstellungen: Arc::new(EinstellungsSpeicher::neu(&ordner)),
+                einstellungen,
+                schluesselbund,
+                datenordner: ordner,
+                speicher_hinweis: std::sync::Mutex::new(speicher_hinweis),
             });
             Ok(())
         })
@@ -86,6 +93,7 @@ pub fn run() {
             befehle::autoconfig_suchen,
             befehle::ordner_auflisten,
             befehle::mails_auflisten,
+            befehle::mails_lokal,
             befehle::mail_gelesen_setzen,
             befehle::mail_loeschen,
             befehle::mail_verschieben,
@@ -93,6 +101,10 @@ pub fn run() {
             befehle::absender_extern_erlauben,
             befehle::anhang_speichern,
             befehle::link_oeffnen,
+            befehle::einstellungen_laden,
+            befehle::lokal_speichern_setzen,
+            befehle::lokalen_speicher_leeren,
+            befehle::absender_extern_entfernen,
         ])
         .run(tauri::generate_context!())
         .expect("SicherMail konnte nicht gestartet werden");

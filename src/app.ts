@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, fehlertext, MAIL_EREIGNIS, type Konto, type MailEreignis, type MailKopf, type Ordner } from "./api";
 import { bestaetigen } from "./dialoge";
 import { el } from "./dom";
+import { einstellungenOeffnen } from "./einstellungen/dialog";
 import { kontoDialogOeffnen } from "./konto/dialog";
 import { datumKurz, ordnerKurzname, ordnerTiefe } from "./postfach/format";
 import { leseansicht, type Inhalt } from "./postfach/lesen";
@@ -10,6 +11,15 @@ import { linkPruefen, type LinkKlick } from "./postfach/sicher";
 
 /** So viele Mails werden pro Seite geladen. */
 export const SEITENGROESSE = 50;
+
+/** Platzhalter, bis die Ordnerliste vom Server da ist. */
+const POSTEINGANG: Ordner = {
+  name: "INBOX",
+  anzeigename: "Posteingang",
+  trenner: null,
+  sonder: "posteingang",
+  waehlbar: true,
+};
 
 interface Auswahl {
   konto: string;
@@ -69,12 +79,15 @@ export class App {
   async starten(): Promise<void> {
     const hinzufuegen = el("button", { type: "button", class: "haupt breit" }, "Konto hinzufügen");
     hinzufuegen.addEventListener("click", () => kontoDialogOeffnen(null, () => void this.kontenLaden()));
+    const einstellungen = el("button", { type: "button", class: "breit" }, "Einstellungen");
+    einstellungen.addEventListener("click", () => void einstellungenOeffnen(() => void this.mailsLaden(false)));
     const seitenleiste = el(
       "aside",
       { class: "seitenleiste" },
       el("h1", {}, "SicherMail"),
       this.kontenBereich,
       hinzufuegen,
+      einstellungen,
     );
     this.wurzel.replaceChildren(
       el("div", { class: "layout" }, seitenleiste, this.listenBereich, this.leseBereich, this.statusLeiste),
@@ -101,8 +114,11 @@ export class App {
       case "verbunden":
         this.zustand.verbindung.delete(ereignis.konto);
         this.statusZeichnen();
-        // Ordner nachladen, falls sie beim Start (z. B. offline) nicht geladen werden konnten.
-        if ((this.zustand.ordner.get(ereignis.konto) ?? []).length === 0) {
+        // Ordner nachladen, falls sie (z. B. offline) nicht geladen werden konnten.
+        if (
+          this.zustand.ordnerFehler.has(ereignis.konto) ||
+          (this.zustand.ordner.get(ereignis.konto) ?? []).length <= 1
+        ) {
           void this.ordnerLaden(ereignis.konto);
         }
         break;
@@ -129,11 +145,16 @@ export class App {
       this.zustand.mails = [];
       this.zustand.offen = null;
     }
+    // Den Posteingang gibt es immer – er ist sofort wählbar, auch ohne Verbindung.
+    for (const konto of this.zustand.konten) {
+      if (!this.zustand.ordner.has(konto.id)) this.zustand.ordner.set(konto.id, [POSTEINGANG]);
+    }
     this.zeichnen();
-    await Promise.all(this.zustand.konten.map((k) => this.ordnerLaden(k.id)));
+    const ordnerGeladen = Promise.all(this.zustand.konten.map((k) => this.ordnerLaden(k.id)));
     if (!this.zustand.auswahl && this.zustand.konten.length > 0) {
       await this.ordnerWaehlen({ konto: this.zustand.konten[0].id, ordner: "INBOX" });
     }
+    await ordnerGeladen;
   }
 
   private async ordnerLaden(konto: string): Promise<void> {
@@ -163,6 +184,18 @@ export class App {
     const start = mehr ? this.zustand.mails.length : 0;
     const anzahl = mehr ? SEITENGROESSE : Math.max(SEITENGROESSE, this.zustand.mails.length);
     this.zustand.laedt = true;
+    // Erste Seite sofort aus dem lokalen Speicher zeigen, dann mit dem Server abgleichen.
+    if (!mehr && this.zustand.mails.length === 0) {
+      try {
+        const lokal = await api.mailsLokal(auswahl.konto, auswahl.ordner, 0, anzahl);
+        if (this.zustand.auswahl === auswahl && lokal.mails.length > 0) {
+          this.zustand.mails = lokal.mails;
+          this.zustand.weitere = lokal.weitere;
+        }
+      } catch {
+        // Ohne lokalen Speicher geht es direkt mit dem Server weiter.
+      }
+    }
     this.listeZeichnen();
     try {
       const seite = await api.mailsAuflisten(auswahl.konto, auswahl.ordner, start, anzahl);

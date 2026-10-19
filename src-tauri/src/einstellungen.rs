@@ -8,11 +8,27 @@ use tokio::sync::Mutex;
 use crate::fehler::Fehlermeldung;
 
 /// Gespeicherte Einstellungen.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Einstellungen {
+    /// Mails verschlüsselt lokal speichern (für das Lesen ohne Internet). Standard: an.
+    #[serde(default = "standard_an")]
+    pub lokal_speichern: bool,
     /// Absender (kleingeschrieben), bei denen externe Inhalte immer geladen werden.
     #[serde(default)]
     pub externe_inhalte_erlaubt: Vec<String>,
+}
+
+fn standard_an() -> bool {
+    true
+}
+
+impl Default for Einstellungen {
+    fn default() -> Self {
+        Self {
+            lokal_speichern: true,
+            externe_inhalte_erlaubt: Vec::new(),
+        }
+    }
 }
 
 pub struct EinstellungsSpeicher {
@@ -70,6 +86,14 @@ impl EinstellungsSpeicher {
                 .contains(&absender)
     }
 
+    /// Nimmt einen Absender aus der Liste „externe Inhalte immer erlauben“.
+    pub async fn extern_entfernen(&self, absender: &str) -> Result<(), Fehlermeldung> {
+        let absender = absender.trim().to_lowercase();
+        self.aendern(|e| e.externe_inhalte_erlaubt.retain(|a| *a != absender))
+            .await?;
+        Ok(())
+    }
+
     /// Erlaubt externe Inhalte für einen Absender dauerhaft.
     pub async fn extern_erlauben(&self, absender: &str) -> Result<(), Fehlermeldung> {
         let absender = absender.trim().to_lowercase();
@@ -90,6 +114,30 @@ impl EinstellungsSpeicher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn lokal_speichern_ist_standardmaessig_an() {
+        let ordner = tempfile::tempdir().unwrap();
+        let speicher = EinstellungsSpeicher::neu(ordner.path());
+        assert!(speicher.laden().await.lokal_speichern);
+        // Ältere Datei ohne das Feld
+        std::fs::write(
+            ordner.path().join("einstellungen.json"),
+            r#"{"externe_inhalte_erlaubt":[]}"#,
+        )
+        .unwrap();
+        assert!(speicher.laden().await.lokal_speichern);
+        speicher
+            .aendern(|e| e.lokal_speichern = false)
+            .await
+            .unwrap();
+        assert!(
+            !EinstellungsSpeicher::neu(ordner.path())
+                .laden()
+                .await
+                .lokal_speichern
+        );
+    }
 
     #[tokio::test]
     async fn absender_erlauben() {

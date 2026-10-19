@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -23,6 +24,9 @@ use crate::konto::KontoVerwaltung;
 
 /// Höchstdauer eines einzelnen Befehls.
 const BEFEHL_ZEITLIMIT: Duration = Duration::from_secs(120);
+
+/// Mails bis zu dieser Grösse werden für das Lesen ohne Internet vorgeladen.
+pub const MAX_VORLADEN_GROESSE: u32 = 5 * 1024 * 1024;
 
 type Sitzungsplatz = Arc<Mutex<Option<ImapSitzung>>>;
 type Zukunft<'a, T> = Pin<Box<dyn Future<Output = Result<T, SyncFehler>> + Send + 'a>>;
@@ -53,6 +57,7 @@ pub struct ImapDienst {
     sitzungen: std::sync::Mutex<HashMap<String, Sitzungsplatz>>,
     ordner: std::sync::Mutex<HashMap<String, Vec<Ordner>>>,
     erste_seite: u32,
+    vorladen: AtomicBool,
 }
 
 impl ImapDienst {
@@ -63,7 +68,17 @@ impl ImapDienst {
             sitzungen: Default::default(),
             ordner: Default::default(),
             erste_seite: ERSTE_SEITE,
+            vorladen: AtomicBool::new(false),
         }
+    }
+
+    /// Sollen Inhalte neuer Mails für das Lesen ohne Internet vorgeladen werden?
+    pub fn vorladen(&self) -> bool {
+        self.vorladen.load(Ordering::Relaxed)
+    }
+
+    pub fn vorladen_setzen(&self, an: bool) {
+        self.vorladen.store(an, Ordering::Relaxed);
     }
 
     /// Ändert, wie viele Mails beim ersten Abgleich eines Ordners geladen werden.
@@ -143,9 +158,11 @@ impl ImapDienst {
                 Err(_) => Err(VerbindungsFehler::Zeitueberschreitung.into()),
             };
             match ergebnis {
-                Err(SyncFehler::Verbindung(fehler)) if fehler.neu_verbinden_sinnvoll() => {
+                Err(SyncFehler::Verbindung(fehler)) => {
+                    // Nach jedem Fehler die Sitzung verwerfen: Sie könnte noch unvollständig
+                    // gelesene Antworten enthalten und darf so nicht weiterverwendet werden.
                     *sitzung = None;
-                    if versuch >= 2 {
+                    if versuch >= 2 || !fehler.neu_verbinden_sinnvoll() {
                         return Err(fehler.into());
                     }
                 }
@@ -156,9 +173,23 @@ impl ImapDienst {
 
     /// Ordnerliste vom Server.
     pub async fn ordner(&self, konto_id: &str) -> Result<Vec<Ordner>, Fehlermeldung> {
+        let versuche = Arc::new(AtomicUsize::new(0));
         let liste = self
-            .ausfuehren(konto_id, |s| {
-                Box::pin(async move { Ok(ordner_laden(s).await?) })
+            .ausfuehren(konto_id, move |s| {
+                let versuche = versuche.clone();
+                Box::pin(async move {
+                    let liste = ordner_laden(s).await?;
+                    // Jeder IMAP-Server hat einen Posteingang. Fehlt er, war die Antwort
+                    // unvollständig: einmal mit frischer Verbindung wiederholen.
+                    if !liste
+                        .iter()
+                        .any(|o| o.sonder == Some(Sonderordner::Posteingang))
+                        && versuche.fetch_add(1, Ordering::SeqCst) == 0
+                    {
+                        return Err(VerbindungsFehler::Unterbrochen.into());
+                    }
+                    Ok(liste)
+                })
             })
             .await?;
         if let Ok(mut ordner) = self.ordner.lock() {
@@ -207,6 +238,24 @@ impl ImapDienst {
                 })
             })
             .await?)
+    }
+
+    /// Eine Seite der Mailliste nur aus dem lokalen Zwischenspeicher (ohne Netz, sofort).
+    pub fn mails_lokal(
+        &self,
+        konto_id: &str,
+        ordner: &str,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<MailSeite, Fehlermeldung> {
+        let mails = self.cache().seite(konto_id, ordner, start, anzahl)?;
+        let weitere = mails.len() == anzahl;
+        Ok(MailSeite {
+            mails,
+            auf_server: None,
+            offline: None,
+            weitere,
+        })
     }
 
     /// Eine Seite der Mailliste (neueste zuerst).
@@ -286,9 +335,11 @@ impl ImapDienst {
             return Ok(inhalt);
         }
         let ordner_name = ordner.to_string();
+        let versuche = Arc::new(AtomicUsize::new(0));
         let daten = self
             .ausfuehren(konto_id, move |s| {
                 let ordner = ordner_name.clone();
+                let versuche = versuche.clone();
                 Box::pin(async move {
                     s.select(&ordner).await.map_err(fehler_einordnen)?;
                     let antworten: Vec<Fetch> = s
@@ -298,22 +349,78 @@ impl ImapDienst {
                         .try_collect()
                         .await
                         .map_err(fehler_einordnen)?;
-                    antworten
+                    match antworten
                         .iter()
                         .find(|f| f.uid == Some(uid))
                         .and_then(|f| f.body())
-                        .map(<[u8]>::to_vec)
-                        .ok_or_else(|| {
-                            SyncFehler::Speicher(Fehlermeldung::neu(
-                                "nicht_gefunden",
-                                "Diese Mail gibt es auf dem Server nicht mehr.",
-                            ))
-                        })
+                    {
+                        Some(inhalt) => Ok(inhalt.to_vec()),
+                        // Erst nach einem zweiten Versuch mit frischer Verbindung aufgeben.
+                        None if versuche.fetch_add(1, Ordering::SeqCst) == 0 => {
+                            Err(VerbindungsFehler::Unterbrochen.into())
+                        }
+                        None => Err(SyncFehler::Speicher(Fehlermeldung::neu(
+                            "nicht_gefunden",
+                            "Diese Mail gibt es auf dem Server nicht mehr.",
+                        ))),
+                    }
                 })
             })
             .await?;
         cache.inhalt_speichern(konto_id, ordner, uid, &daten)?;
         Ok(daten)
+    }
+
+    /// Lädt die Inhalte der neuesten `anzahl` Mails, die noch nicht gespeichert sind
+    /// (höchstens 5 MB pro Mail), damit sie ohne Internet lesbar sind.
+    pub async fn inhalte_vorladen(
+        &self,
+        konto_id: &str,
+        ordner: &str,
+        anzahl: usize,
+    ) -> Result<usize, Fehlermeldung> {
+        let cache = self.cache();
+        let mut fehlend = Vec::new();
+        for kopf in cache.seite(konto_id, ordner, 0, anzahl)? {
+            if kopf.groesse <= MAX_VORLADEN_GROESSE
+                && !cache.hat_inhalt(konto_id, ordner, kopf.uid)?
+            {
+                fehlend.push(kopf.uid);
+            }
+        }
+        if fehlend.is_empty() {
+            return Ok(0);
+        }
+        let menge = fehlend
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let ordner_name = ordner.to_string();
+        let inhalte = self
+            .ausfuehren(konto_id, move |s| {
+                let ordner = ordner_name.clone();
+                let menge = menge.clone();
+                Box::pin(async move {
+                    s.select(&ordner).await.map_err(fehler_einordnen)?;
+                    let antworten: Vec<Fetch> = s
+                        .uid_fetch(&menge, "(UID BODY.PEEK[])")
+                        .await
+                        .map_err(fehler_einordnen)?
+                        .try_collect()
+                        .await
+                        .map_err(fehler_einordnen)?;
+                    Ok(antworten
+                        .iter()
+                        .filter_map(|f| Some((f.uid?, f.body()?.to_vec())))
+                        .collect::<Vec<_>>())
+                })
+            })
+            .await?;
+        for (uid, inhalt) in &inhalte {
+            cache.inhalt_speichern(konto_id, ordner, *uid, inhalt)?;
+        }
+        Ok(inhalte.len())
     }
 
     /// Markiert eine Mail als gelesen oder ungelesen (auch auf dem Server).

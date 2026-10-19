@@ -63,7 +63,11 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 - **Nie automatisch löschen**: kein `CLOSE`, kein allgemeines `EXPUNGE`. Gelöscht wird nur auf Wunsch des
   Nutzers: Verschieben in den Papierkorb (`UID MOVE`, sonst `UID COPY` + `\Deleted`), endgültig nur die
   eine Mail per `UID EXPUNGE` (UIDPLUS). Ohne UIDPLUS bleibt sie als gelöscht markiert und wird ausgeblendet.
-- **Zwischenspeicher** über die Schnittstelle `MailCache`; derzeit im Arbeitsspeicher (`SpeicherCache`).
+- **Zwischenspeicher** über die Schnittstelle `MailCache`: verschlüsselt auf der Festplatte (`speicher::SqlCache`,
+  Standard) oder nur im Arbeitsspeicher (`SpeicherCache`, wenn „Mails lokal speichern“ aus ist).
+- **Robustheit**: Nach jedem Fehler wird die Befehlsverbindung verworfen, damit nie mit halb gelesenen Antworten
+  weitergearbeitet wird. Fehlt in einer Antwort Unerwartetes (z. B. der Posteingang in der Ordnerliste oder eine
+  gerade gemeldete Mail), wird einmal mit frischer Verbindung wiederholt.
 
 ## Mails anzeigen (`anzeige`)
 
@@ -85,3 +89,14 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   öffnet ihn über den Backend-Befehl `link_oeffnen` im Standardbrowser.
 - **Anhänge** speichert der Backend-Befehl `anhang_speichern` über den Dialog „Speichern unter“ (Dateiname
   gesäubert). Das Frontend hat weder Dialog- noch Dateisystemrechte.
+
+## Lokaler Speicher (`speicher`)
+
+- SQLite mit SQLCipher (`rusqlite`, Feature `bundled-sqlcipher-vendored-openssl`), Datei `mails.db`.
+- Schlüssel: 32 Zufallsbytes (`ring::rand::SystemRandom`), als Hex im Schlüsselbund (`speicher:schluessel`), als
+  Rohschlüssel gesetzt (`PRAGMA key = "x'…'"`), nie in Dateien oder Logs. Passt der Schlüssel nicht oder fehlt er,
+  wird die Datei verworfen und neu angelegt.
+- `PRAGMA secure_delete = ON`, Dateirechte `0600`. „Lokalen Speicher leeren“ löscht alle Zeilen und führt `VACUUM` aus.
+- Tabellen `ordner_stand` (UIDVALIDITY/UIDNEXT je Ordner) und `mails` (Kopfdaten und optional Inhalt je UID).
+- Die Oberfläche zeigt die Mailliste sofort aus dem Speicher (`mails_lokal`) und gleicht danach mit dem Server ab.
+  Der Beobachter lädt die Inhalte der neuesten 50 Mails im Posteingang (bis 5 MB je Mail) für das Lesen ohne Internet vor.

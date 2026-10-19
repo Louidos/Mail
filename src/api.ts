@@ -116,6 +116,13 @@ export interface AufbereiteteMail {
   anhaenge: Anhang[];
 }
 
+export interface Einstellungen {
+  lokal_speichern: boolean;
+  externe_inhalte_erlaubt: string[];
+  /** Gesetzt, wenn der verschlüsselte Speicher nicht verfügbar ist. */
+  speicher_hinweis: string | null;
+}
+
 /** Macht aus einem Fehler des Backends einen lesbaren Text. */
 export function fehlertext(fehler: unknown): string {
   if (typeof fehler === "string") return fehler;
@@ -134,6 +141,8 @@ export const api = {
   ordnerAuflisten: (konto: string) => invoke<Ordner[]>("ordner_auflisten", { konto }),
   mailsAuflisten: (konto: string, ordner: string, start: number, anzahl: number) =>
     invoke<MailSeite>("mails_auflisten", { konto, ordner, start, anzahl }),
+  mailsLokal: (konto: string, ordner: string, start: number, anzahl: number) =>
+    invoke<MailSeite>("mails_lokal", { konto, ordner, start, anzahl }),
   gelesenSetzen: (konto: string, ordner: string, uid: number, gelesen: boolean) =>
     invoke<void>("mail_gelesen_setzen", { konto, ordner, uid, gelesen }),
   mailLoeschen: (konto: string, ordner: string, uid: number) => invoke<void>("mail_loeschen", { konto, ordner, uid }),
@@ -145,4 +154,8 @@ export const api = {
   anhangSpeichern: (konto: string, ordner: string, uid: number, index: number) =>
     invoke<string | null>("anhang_speichern", { konto, ordner, uid, index }),
   linkOeffnen: (url: string) => invoke<void>("link_oeffnen", { url }),
+  einstellungenLaden: () => invoke<Einstellungen>("einstellungen_laden"),
+  lokalSpeichernSetzen: (an: boolean) => invoke<void>("lokal_speichern_setzen", { an }),
+  lokalenSpeicherLeeren: () => invoke<void>("lokalen_speicher_leeren"),
+  absenderExternEntfernen: (adresse: string) => invoke<void>("absender_extern_entfernen", { adresse }),
 };

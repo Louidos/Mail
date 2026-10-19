@@ -8,6 +8,7 @@ Grundsätze:
 
 - Verbindungen nur über TLS oder STARTTLS, Zertifikate werden immer geprüft.
 - Passwörter liegen ausschliesslich im Schlüsselbund des Betriebssystems.
+- Lokal gespeicherte Mails sind verschlüsselt (SQLCipher).
 - Keine Telemetrie, keine Fremddienste.
 
 ## Projektstand
@@ -18,7 +19,7 @@ Version: **0.0.0** (in Entwicklung, noch keine veröffentlichte Version)
 - [x] Konto mit eigenem Mailserver einrichten
 - [x] Mails empfangen (IMAP, IDLE)
 - [x] Mails sicher anzeigen
-- [ ] Verschlüsselter lokaler Speicher
+- [x] Verschlüsselter lokaler Speicher
 - [ ] Mails senden (SMTP)
 
 Änderungen stehen im [CHANGELOG](CHANGELOG.md).

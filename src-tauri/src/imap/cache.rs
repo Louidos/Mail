@@ -71,6 +71,10 @@ pub trait MailCache: Send + Sync {
     fn kopf(&self, konto: &str, ordner: &str, uid: u32) -> Result<Option<MailKopf>, Fehlermeldung>;
     fn inhalt(&self, konto: &str, ordner: &str, uid: u32)
         -> Result<Option<Vec<u8>>, Fehlermeldung>;
+    /// Ist der Inhalt der Mail gespeichert?
+    fn hat_inhalt(&self, konto: &str, ordner: &str, uid: u32) -> Result<bool, Fehlermeldung> {
+        Ok(self.inhalt(konto, ordner, uid)?.is_some())
+    }
     fn inhalt_speichern(
         &self,
         konto: &str,

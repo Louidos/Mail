@@ -151,6 +151,25 @@ describe("App", () => {
     expect(wurzel.querySelector(".statusleiste")?.textContent).toBe("");
   });
 
+  it("zeigt lokal gespeicherte Mails sofort, auch wenn der Server nicht antwortet", async () => {
+    backend({
+      konten_auflisten: [konto],
+      ordner_auflisten: () => new Promise(() => {}),
+      mails_lokal: { mails: [mail(3, true)], auf_server: null, offline: null, weitere: false },
+      mails_auflisten: () => new Promise(() => {}),
+    });
+    const wurzel = document.createElement("div");
+    document.body.append(wurzel);
+    // Nicht abwarten: Der Server antwortet in diesem Test nie.
+    void new App(wurzel).starten();
+    for (let i = 0; i < 5; i++) await warten();
+    expect(wurzel.querySelectorAll("button.mail")).toHaveLength(1);
+    expect(wurzel.querySelector(".mail-betreff")?.textContent).toBe("Betreff 3");
+    // Der Posteingang ist ohne Ordnerliste vom Server wählbar.
+    expect(wurzel.querySelector(".ordner-knopf")?.textContent).toBe("Posteingang");
+    expect(wurzel.textContent).toContain("Mails werden geladen");
+  });
+
   it("lädt ältere Mails nach", async () => {
     const { wurzel } = await starten({
       konten_auflisten: [konto],
