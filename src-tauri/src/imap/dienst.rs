@@ -17,6 +17,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
+pub use super::beobachter::POSTEINGANG;
 use super::cache::{MailCache, MailKopf};
 use super::ordner::{ordner_laden, Ordner, Sonderordner};
 use super::suche::{suchbefehl, uid_suchen, MAX_SERVER_TREFFER};
@@ -47,6 +48,18 @@ pub struct MailSeite {
     pub offline: Option<String>,
     /// Gibt es vermutlich weitere (ältere) Mails?
     pub weitere: bool,
+}
+
+/// Eine Seite des gemeinsamen Posteingangs (#50).
+#[derive(Debug, Clone, Serialize)]
+pub struct PosteingangSeite {
+    /// Mails der Posteingänge aller Konten, neueste zuerst; jede mit ihrem Konto.
+    pub mails: Vec<MailEintrag>,
+    pub weitere: bool,
+    /// Ungelesene Mails in allen Posteingängen (soweit lokal bekannt).
+    pub ungelesen: usize,
+    /// Gesetzt, wenn ältere Mails eines Kontos nicht geladen werden konnten (z. B. offline).
+    pub hinweis: Option<String>,
 }
 
 /// Ist der Fehler ein Verbindungsproblem (dann werden lokale Daten gezeigt)?
@@ -293,6 +306,90 @@ impl ImapDienst {
         let weitere = mails.len() > anzahl;
         mails.truncate(anzahl);
         Ok(SuchSeite { mails, weitere })
+    }
+
+    /// Gemeinsamer Posteingang (#50): die Posteingänge aller `konten` in einer Liste, nach Datum.
+    ///
+    /// Gelesen wird nur aus dem lokalen Zwischenspeicher; neue Mails bringen die bestehenden
+    /// Beobachter (IDLE) hinein. Nur mit `nachladen` („Ältere Mails laden“) holt jedes Konto über
+    /// seine bestehende Befehlsverbindung ältere Mails nach – es entstehen keine neuen Arten von
+    /// Verbindungen.
+    pub async fn alle_posteingaenge(
+        &self,
+        konten: &[String],
+        start: usize,
+        anzahl: usize,
+        nachladen: bool,
+    ) -> Result<PosteingangSeite, Fehlermeldung> {
+        let mut hinweis = None;
+        let mut auf_server_weitere = false;
+        if nachladen {
+            for konto in konten {
+                let vorhanden = self.cache().uids(konto, POSTEINGANG)?.len();
+                match self
+                    .mails_seite(konto, POSTEINGANG, vorhanden, anzahl)
+                    .await
+                {
+                    Ok(seite) => {
+                        auf_server_weitere |= seite.weitere;
+                        if let Some(meldung) = seite.offline {
+                            hinweis.get_or_insert(meldung);
+                        }
+                    }
+                    // Ein Konto ohne Verbindung hält die anderen nicht auf.
+                    Err(fehler) => {
+                        hinweis.get_or_insert(fehler.meldung);
+                    }
+                }
+            }
+        }
+        let cache = self.cache();
+        let mut mails = cache.ueber_konten(konten, POSTEINGANG, start, anzahl.saturating_add(1))?;
+        let weitere = mails.len() > anzahl || auf_server_weitere || !nachladen;
+        mails.truncate(anzahl);
+        Ok(PosteingangSeite {
+            mails,
+            weitere,
+            ungelesen: cache.ungelesen(konten, POSTEINGANG)?,
+            hinweis,
+        })
+    }
+
+    /// Server-Suche (#49) in den Posteingängen aller `konten` (#50), je über die Verbindung des
+    /// Kontos. Konten ohne Verbindung werden übersprungen; scheitern alle, kommt der Fehler.
+    pub async fn server_suchen_posteingaenge(
+        &self,
+        konten: &[String],
+        begriff: &str,
+        feld: SuchFeld,
+    ) -> Result<SuchSeite, Fehlermeldung> {
+        let mut seite = SuchSeite::default();
+        let mut erster_fehler = None;
+        let mut erfolgreich = konten.is_empty();
+        for konto in konten {
+            match self
+                .server_suchen(konto, Some(POSTEINGANG), begriff, feld)
+                .await
+            {
+                Ok(teil) => {
+                    erfolgreich = true;
+                    seite.weitere |= teil.weitere;
+                    seite.mails.extend(teil.mails);
+                }
+                Err(fehler) => {
+                    erster_fehler.get_or_insert(fehler);
+                }
+            }
+        }
+        if let (false, Some(fehler)) = (erfolgreich, erster_fehler) {
+            return Err(fehler);
+        }
+        seite.mails.sort_by(suche::nach_datum);
+        if seite.mails.len() > MAX_SERVER_TREFFER {
+            seite.mails.truncate(MAX_SERVER_TREFFER);
+            seite.weitere = true;
+        }
+        Ok(seite)
     }
 
     /// Eine Seite der Mailliste (neueste zuerst).

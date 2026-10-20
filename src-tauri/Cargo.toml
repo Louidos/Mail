@@ -130,3 +130,7 @@ path = "../tests/integration/smime.rs"
 [[test]]
 name = "suche"
 path = "../tests/integration/suche.rs"
+
+[[test]]
+name = "posteingaenge"
+path = "../tests/integration/posteingaenge.rs"

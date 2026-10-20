@@ -100,6 +100,19 @@ pub trait MailCache: Send + Sync {
         start: usize,
         anzahl: usize,
     ) -> Result<Vec<MailEintrag>, Fehlermeldung>;
+
+    /// Gemeinsamer Posteingang (#50): die Mails des Ordners `ordner` aller `konten` in einer
+    /// Liste, neueste zuerst (nach Datum), ab `start`.
+    fn ueber_konten(
+        &self,
+        konten: &[String],
+        ordner: &str,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<Vec<MailEintrag>, Fehlermeldung>;
+
+    /// Anzahl ungelesener Mails im Ordner `ordner` der `konten`.
+    fn ungelesen(&self, konten: &[String], ordner: &str) -> Result<usize, Fehlermeldung>;
 }
 
 #[derive(Default)]
@@ -334,6 +347,44 @@ impl MailCache for SpeicherCache {
             .collect();
         treffer.sort_by(suche::nach_datum);
         Ok(treffer.into_iter().skip(start).take(anzahl).collect())
+    }
+
+    fn ueber_konten(
+        &self,
+        konten: &[String],
+        ordner: &str,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<Vec<MailEintrag>, Fehlermeldung> {
+        let daten = self
+            .daten
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?;
+        let mut mails: Vec<MailEintrag> = daten
+            .iter()
+            .filter(|((konto, o), _)| o == ordner && konten.contains(konto))
+            .flat_map(|((konto, o), d)| {
+                d.koepfe.values().map(|kopf| MailEintrag {
+                    konto: konto.clone(),
+                    ordner: o.clone(),
+                    kopf: kopf.clone(),
+                })
+            })
+            .collect();
+        mails.sort_by(suche::nach_datum);
+        Ok(mails.into_iter().skip(start).take(anzahl).collect())
+    }
+
+    fn ungelesen(&self, konten: &[String], ordner: &str) -> Result<usize, Fehlermeldung> {
+        let daten = self
+            .daten
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?;
+        Ok(daten
+            .iter()
+            .filter(|((konto, o), _)| o == ordner && konten.contains(konto))
+            .map(|(_, d)| d.koepfe.values().filter(|k| !k.gelesen).count())
+            .sum())
     }
 }
 
@@ -602,6 +653,71 @@ pub(crate) mod tests {
         );
         cache.leeren().unwrap();
         assert!(finden("rechnung", SuchFeld::Alle, &[("anders", None)]).is_empty());
+    }
+
+    /// Prüft den gemeinsamen Posteingang (#50): Mails mehrerer Konten gemischt nach Datum.
+    pub(crate) fn ueber_konten_pruefen(cache: &dyn MailCache) {
+        let mit_datum = |uid: u32, datum: Option<i64>, gelesen: bool| MailKopf {
+            datum,
+            gelesen,
+            ..kopf(uid)
+        };
+        // Konto A hat hohe UIDs mit alten Daten, Konto B kleine UIDs mit neuen: sortiert wird
+        // nach Datum, nicht nach UID.
+        cache
+            .koepfe_speichern(
+                "a",
+                "INBOX",
+                &[
+                    mit_datum(500, Some(100), true),
+                    mit_datum(501, Some(300), false),
+                    mit_datum(502, None, false),
+                ],
+            )
+            .unwrap();
+        cache
+            .koepfe_speichern(
+                "b",
+                "INBOX",
+                &[
+                    mit_datum(1, Some(200), false),
+                    mit_datum(2, Some(400), true),
+                ],
+            )
+            .unwrap();
+        cache
+            .koepfe_speichern("a", "Archiv", &[mit_datum(9, Some(999), false)])
+            .unwrap();
+        cache
+            .koepfe_speichern("c", "INBOX", &[mit_datum(7, Some(999), false)])
+            .unwrap();
+        let konten = ["a".to_string(), "b".to_string()];
+        let liste =
+            |start, anzahl| uids_von(&cache.ueber_konten(&konten, "INBOX", start, anzahl).unwrap());
+        let ort = |k: &str, u: u32| (k.to_string(), "INBOX".to_string(), u);
+        assert_eq!(
+            liste(0, 10),
+            vec![
+                ort("b", 2),
+                ort("a", 501),
+                ort("b", 1),
+                ort("a", 500),
+                ort("a", 502)
+            ]
+        );
+        // Seitenweise ohne Lücken und Doppelte.
+        assert_eq!(liste(0, 2), vec![ort("b", 2), ort("a", 501)]);
+        assert_eq!(liste(2, 2), vec![ort("b", 1), ort("a", 500)]);
+        assert_eq!(liste(4, 2), vec![ort("a", 502)]);
+        assert_eq!(cache.ungelesen(&konten, "INBOX").unwrap(), 3);
+        assert_eq!(cache.ungelesen(&["c".to_string()], "INBOX").unwrap(), 1);
+        assert!(cache.ueber_konten(&[], "INBOX", 0, 10).unwrap().is_empty());
+        assert_eq!(cache.ungelesen(&[], "INBOX").unwrap(), 0);
+    }
+
+    #[test]
+    fn speicher_cache_ueber_konten() {
+        ueber_konten_pruefen(&SpeicherCache::default());
     }
 
     #[test]

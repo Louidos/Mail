@@ -93,6 +93,16 @@ export interface SuchSeite {
   weitere: boolean;
 }
 
+/** Eine Seite des gemeinsamen Posteingangs (#50). */
+export interface PosteingangSeite {
+  mails: MailEintrag[];
+  weitere: boolean;
+  /** Ungelesene Mails in allen Posteingängen (soweit lokal bekannt). */
+  ungelesen: number;
+  /** Ältere Mails eines Kontos konnten nicht geladen werden. */
+  hinweis: string | null;
+}
+
 export interface MailSeite {
   mails: MailKopf[];
   auf_server: number | null;
@@ -315,12 +325,25 @@ export const api = {
     invoke<MailSeite>("mails_auflisten", { konto, ordner, start, anzahl }),
   mailsLokal: (konto: string, ordner: string, start: number, anzahl: number) =>
     invoke<MailSeite>("mails_lokal", { konto, ordner, start, anzahl }),
-  /** Lokale Suche im verschlüsselten Speicher; `ordner = null` heisst: alle Ordner des Kontos. */
-  mailsSuchen: (konto: string, ordner: string | null, begriff: string, feld: SuchFeld, start: number, anzahl: number) =>
-    invoke<SuchSeite>("mails_suchen", { konto, ordner, begriff, feld, start, anzahl }),
-  /** Suche auf dem eigenen Server (nur auf ausdrücklichen Klick). */
-  mailsServerSuchen: (konto: string, ordner: string | null, begriff: string, feld: SuchFeld) =>
+  /**
+   * Lokale Suche im verschlüsselten Speicher; `ordner = null` heisst: alle Ordner des Kontos,
+   * `konto = null`: die Posteingänge aller Konten.
+   */
+  mailsSuchen: (
+    konto: string | null,
+    ordner: string | null,
+    begriff: string,
+    feld: SuchFeld,
+    start: number,
+    anzahl: number,
+  ) => invoke<SuchSeite>("mails_suchen", { konto, ordner, begriff, feld, start, anzahl }),
+  /** Suche auf dem eigenen Server (nur auf ausdrücklichen Klick); `konto = null`: alle Posteingänge. */
+  mailsServerSuchen: (konto: string | null, ordner: string | null, begriff: string, feld: SuchFeld) =>
     invoke<SuchSeite>("mails_server_suchen", { konto, ordner, begriff, feld }),
+  /** Gemeinsamer Posteingang aller Konten (nur lokal; `nachladen` holt ältere Mails). */
+  allePosteingaenge: (start: number, anzahl: number, nachladen: boolean) =>
+    invoke<PosteingangSeite>("alle_posteingaenge", { start, anzahl, nachladen }),
+  posteingaengeUngelesen: () => invoke<number>("posteingaenge_ungelesen"),
   gelesenSetzen: (konto: string, ordner: string, uid: number, gelesen: boolean) =>
     invoke<void>("mail_gelesen_setzen", { konto, ordner, uid, gelesen }),
   mailLoeschen: (konto: string, ordner: string, uid: number) => invoke<void>("mail_loeschen", { konto, ordner, uid }),

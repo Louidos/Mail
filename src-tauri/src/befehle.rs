@@ -17,7 +17,7 @@ use crate::einstellungen::{Darstellung, EinstellungsSpeicher};
 use crate::fehler::Fehlermeldung;
 use crate::imap::beobachter::{Beobachter, Melder};
 use crate::imap::cache::{MailCache, SpeicherCache};
-use crate::imap::dienst::{ImapDienst, MailSeite};
+use crate::imap::dienst::{ImapDienst, MailSeite, PosteingangSeite, POSTEINGANG};
 use crate::imap::ordner::Ordner;
 use crate::konto::autoconfig::{self, Vorschlag};
 use crate::konto::schluesselbund::Schluesselbund;
@@ -175,41 +175,100 @@ pub async fn mails_lokal(
         .mails_lokal(&konto, &ordner, start, anzahl.clamp(1, MAX_SEITE))
 }
 
+/// IDs aller eingerichteten Konten.
+async fn alle_konten(zustand: &AppZustand) -> Result<Vec<String>, Fehlermeldung> {
+    Ok(zustand
+        .konten
+        .alle()
+        .await?
+        .into_iter()
+        .map(|k| k.id)
+        .collect())
+}
+
 /// Lokale Suche (#49) im verschlüsselten Speicher: im Ordner `ordner` oder – ohne Ordner – in
-/// allen Ordnern des Kontos. Geht nie ans Netz.
+/// allen Ordnern des Kontos. Ohne Konto: in den Posteingängen aller Konten (#50). Geht nie ans
+/// Netz.
 #[tauri::command]
 pub async fn mails_suchen(
     zustand: State<'_, AppZustand>,
-    konto: String,
+    konto: Option<String>,
     ordner: Option<String>,
     begriff: String,
     feld: SuchFeld,
     start: usize,
     anzahl: usize,
 ) -> Result<SuchSeite, Fehlermeldung> {
+    let orte = match konto {
+        Some(konto) => vec![SuchOrt { konto, ordner }],
+        None => alle_konten(&zustand)
+            .await?
+            .into_iter()
+            .map(|konto| SuchOrt {
+                konto,
+                ordner: Some(POSTEINGANG.to_string()),
+            })
+            .collect(),
+    };
     let suche = Suche {
         begriff,
         feld,
-        orte: vec![SuchOrt { konto, ordner }],
+        orte,
     };
     let imap = zustand.imap.clone();
     blockierend(move || imap.suchen(&suche, start, anzahl.clamp(1, MAX_SEITE))).await
 }
 
 /// Suche auf dem Server (#49) mit `UID SEARCH` – nur auf ausdrücklichen Klick, nur über die
-/// Verbindung des Kontos.
+/// Verbindung des Kontos. Ohne Konto: in den Posteingängen aller Konten (#50).
 #[tauri::command]
 pub async fn mails_server_suchen(
     zustand: State<'_, AppZustand>,
-    konto: String,
+    konto: Option<String>,
     ordner: Option<String>,
     begriff: String,
     feld: SuchFeld,
 ) -> Result<SuchSeite, Fehlermeldung> {
+    match konto {
+        Some(konto) => {
+            zustand
+                .imap
+                .server_suchen(&konto, ordner.as_deref(), &begriff, feld)
+                .await
+        }
+        None => {
+            let konten = alle_konten(&zustand).await?;
+            zustand
+                .imap
+                .server_suchen_posteingaenge(&konten, &begriff, feld)
+                .await
+        }
+    }
+}
+
+/// Gemeinsamer Posteingang (#50): die Posteingänge aller Konten aus dem lokalen Speicher, nach
+/// Datum. `nachladen` („Ältere Mails laden“) holt ältere Mails über die bestehenden Verbindungen.
+#[tauri::command]
+pub async fn alle_posteingaenge(
+    zustand: State<'_, AppZustand>,
+    start: usize,
+    anzahl: usize,
+    nachladen: bool,
+) -> Result<PosteingangSeite, Fehlermeldung> {
+    let konten = alle_konten(&zustand).await?;
     zustand
         .imap
-        .server_suchen(&konto, ordner.as_deref(), &begriff, feld)
+        .alle_posteingaenge(&konten, start, anzahl.clamp(1, MAX_SEITE), nachladen)
         .await
+}
+
+/// Ungelesene Mails in den Posteingängen aller Konten (für die Seitenleiste, #50).
+#[tauri::command]
+pub async fn posteingaenge_ungelesen(
+    zustand: State<'_, AppZustand>,
+) -> Result<usize, Fehlermeldung> {
+    let konten = alle_konten(&zustand).await?;
+    zustand.imap.cache().ungelesen(&konten, POSTEINGANG)
 }
 
 #[tauri::command]

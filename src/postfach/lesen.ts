@@ -44,6 +44,8 @@ export interface LeseOptionen {
   nurText: boolean;
   /** Kurze Rückmeldung, z. B. nach dem Speichern eines Anhangs. */
   hinweis: string | null;
+  /** Konto der Mail, im gemeinsamen Posteingang angezeigt (#50). */
+  konto?: string | null;
 }
 
 export function adresseText(adresse: Adresse): string {
@@ -416,6 +418,7 @@ export function leseansicht(
   if (mail?.an.length) kopfdaten.push(el("dt", {}, "An"), el("dd", {}, mail.an.map(adresseText).join(", ")));
   if (mail?.cc.length) kopfdaten.push(el("dt", {}, "Cc"), el("dd", {}, mail.cc.map(adresseText).join(", ")));
   kopfdaten.push(el("dt", {}, "Datum"), el("dd", {}, datumLang(mail?.datum ?? kopf.datum)));
+  if (optionen.konto) kopfdaten.push(el("dt", {}, "Konto"), el("dd", { class: "lese-konto" }, optionen.konto));
 
   return el(
     "article",

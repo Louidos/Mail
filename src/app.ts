@@ -27,6 +27,7 @@ import { datumKurz, ordnerKurzname, ordnerTiefe } from "./postfach/format";
 import { leseansicht, type Inhalt } from "./postfach/lesen";
 import { linkPruefen, type LinkKlick } from "./postfach/sicher";
 import { hervorheben, SUCH_SEITE, Suchleiste, suchwoerter, type SuchBereich } from "./postfach/suche";
+import { kontoKennung, kontoMarke } from "./postfach/konten";
 
 /** So viele Mails werden pro Seite geladen. */
 export const SEITENGROESSE = 50;
@@ -40,10 +41,14 @@ const POSTEINGANG: Ordner = {
   waehlbar: true,
 };
 
+/** Gewählter Ordner; `konto = null` ist der gemeinsame Posteingang „Alle Posteingänge“ (#50). */
 interface Auswahl {
-  konto: string;
+  konto: string | null;
   ordner: string;
 }
+
+/** Auswahl „Alle Posteingänge“. */
+const ALLE_POSTEINGAENGE = { konto: null, ordner: "INBOX" } as const;
 
 /** Dieselbe Mail (Konto, Ordner und UID)? */
 export function gleicheMail(a: MailEintrag | null | undefined, b: MailEintrag | null | undefined): boolean {
@@ -77,6 +82,8 @@ interface Zustand {
   offen: MailEintrag | null;
   /** Aktive Suche; `null` zeigt die normale Mailliste. */
   suche: SuchZustand | null;
+  /** Ungelesene Mails in allen Posteingängen (für „Alle Posteingänge“). */
+  ungelesenAlle: number | null;
   /** Inhalt der geöffneten Mail. */
   inhalt: Inhalt | null;
   /** „Nur Text anzeigen“ */
@@ -99,6 +106,7 @@ export class App {
     laedt: false,
     offen: null,
     suche: null,
+    ungelesenAlle: null,
     inhalt: null,
     nurText: false,
     hinweis: null,
@@ -174,15 +182,22 @@ export class App {
   ereignis(ereignis: MailEreignis): void {
     const { auswahl } = this.zustand;
     switch (ereignis.art) {
-      case "mails_geaendert":
-        if (auswahl && auswahl.konto === ereignis.konto && auswahl.ordner === ereignis.ordner) {
+      case "mails_geaendert": {
+        const alle = auswahl?.konto === null;
+        if (
+          auswahl &&
+          (auswahl.konto === ereignis.konto || alle) &&
+          auswahl.ordner === ereignis.ordner
+        ) {
           void this.mailsLaden(false);
         }
         // Lokale Treffer aktuell halten (die Server-Suche wird nur auf Klick wiederholt).
-        if (this.zustand.suche && !this.zustand.suche.server && auswahl?.konto === ereignis.konto) {
+        if (this.zustand.suche && !this.zustand.suche.server && (alle || auswahl?.konto === ereignis.konto)) {
           void this.lokalSuchen("auffrischen");
         }
+        if (ereignis.ordner === "INBOX") void this.ungelesenAktualisieren();
         break;
+      }
       case "verbunden":
         this.zustand.verbindung.delete(ereignis.konto);
         this.statusZeichnen();
@@ -212,7 +227,10 @@ export class App {
       this.zustand.fehler = fehlertext(fehler);
     }
     const ids = new Set(this.zustand.konten.map((k) => k.id));
-    if (this.zustand.auswahl && !ids.has(this.zustand.auswahl.konto)) {
+    const auswahlWeg = this.zustand.auswahl?.konto === null
+      ? this.zustand.konten.length < 2
+      : !!this.zustand.auswahl && !ids.has(this.zustand.auswahl.konto);
+    if (auswahlWeg) {
       this.zustand.auswahl = null;
       this.zustand.mails = [];
       this.zustand.offen = null;
@@ -228,6 +246,21 @@ export class App {
       await this.ordnerWaehlen({ konto: this.zustand.konten[0].id, ordner: "INBOX" });
     }
     await ordnerGeladen;
+    await this.ungelesenAktualisieren();
+  }
+
+  /** Zahl der ungelesenen Mails für „Alle Posteingänge“ (nur bei mehreren Konten). */
+  private async ungelesenAktualisieren(): Promise<void> {
+    if (this.zustand.konten.length < 2) return;
+    try {
+      const anzahl = await api.posteingaengeUngelesen();
+      if (anzahl !== this.zustand.ungelesenAlle) {
+        this.zustand.ungelesenAlle = anzahl;
+        this.kontenZeichnen();
+      }
+    } catch {
+      // Ohne Zahl bleibt der Eintrag trotzdem nutzbar.
+    }
   }
 
   private async ordnerLaden(konto: string): Promise<void> {
@@ -258,13 +291,18 @@ export class App {
     if (!auswahl) return;
     const start = mehr ? this.zustand.mails.length : 0;
     const anzahl = mehr ? SEITENGROESSE : Math.max(SEITENGROESSE, this.zustand.mails.length);
+    if (auswahl.konto === null) {
+      await this.allePosteingaengeLaden(auswahl, mehr, start, anzahl);
+      return;
+    }
+    const konto = auswahl.konto;
     const eintraege = (mails: MailKopf[]): MailEintrag[] =>
-      mails.map((m) => ({ ...m, konto: auswahl.konto, ordner: auswahl.ordner }));
+      mails.map((m) => ({ ...m, konto, ordner: auswahl.ordner }));
     this.zustand.laedt = true;
     // Erste Seite sofort aus dem lokalen Speicher zeigen, dann mit dem Server abgleichen.
     if (!mehr && this.zustand.mails.length === 0) {
       try {
-        const lokal = await api.mailsLokal(auswahl.konto, auswahl.ordner, 0, anzahl);
+        const lokal = await api.mailsLokal(konto, auswahl.ordner, 0, anzahl);
         if (this.zustand.auswahl === auswahl && lokal.mails.length > 0) {
           this.zustand.mails = eintraege(lokal.mails);
           this.zustand.weitere = lokal.weitere;
@@ -275,7 +313,7 @@ export class App {
     }
     this.listeZeichnen();
     try {
-      const seite = await api.mailsAuflisten(auswahl.konto, auswahl.ordner, start, anzahl);
+      const seite = await api.mailsAuflisten(konto, auswahl.ordner, start, anzahl);
       if (this.zustand.auswahl !== auswahl) return;
       this.zustand.mails = mehr ? [...this.zustand.mails, ...eintraege(seite.mails)] : eintraege(seite.mails);
       this.zustand.weitere = seite.weitere;
@@ -285,6 +323,33 @@ export class App {
       // aus anderen Ordnern stammen).
       const offen = this.zustand.offen;
       if (offen && offen.konto === auswahl.konto && offen.ordner === auswahl.ordner) {
+        this.zustand.offen = this.zustand.mails.find((m) => gleicheMail(m, offen)) ?? null;
+      }
+    } catch (fehler) {
+      this.zustand.fehler = fehlertext(fehler);
+    } finally {
+      this.zustand.laedt = false;
+      this.zeichnen();
+    }
+  }
+
+  /**
+   * Gemeinsamer Posteingang (#50): die Posteingänge aller Konten aus dem lokalen Speicher, nach
+   * Datum. Nur „Ältere Mails laden“ holt über die bestehenden Verbindungen Älteres nach.
+   */
+  private async allePosteingaengeLaden(auswahl: Auswahl, mehr: boolean, start: number, anzahl: number): Promise<void> {
+    this.zustand.laedt = true;
+    this.listeZeichnen();
+    try {
+      const seite = await api.allePosteingaenge(start, anzahl, mehr);
+      if (this.zustand.auswahl !== auswahl) return;
+      this.zustand.mails = mehr ? [...this.zustand.mails, ...seite.mails] : seite.mails;
+      this.zustand.weitere = seite.weitere;
+      this.zustand.offline = seite.hinweis;
+      this.zustand.ungelesenAlle = seite.ungelesen;
+      this.zustand.fehler = null;
+      const offen = this.zustand.offen;
+      if (offen && offen.ordner === "INBOX" && !this.zustand.suche) {
         this.zustand.offen = this.zustand.mails.find((m) => gleicheMail(m, offen)) ?? null;
       }
     } catch (fehler) {
@@ -326,7 +391,7 @@ export class App {
     try {
       const seite = await api.mailsSuchen(
         auswahl.konto,
-        bereich === "ordner" ? auswahl.ordner : null,
+        bereich === "ordner" && auswahl.konto !== null ? auswahl.ordner : null,
         begriff,
         feld,
         start,
@@ -356,7 +421,7 @@ export class App {
     try {
       const seite = await api.mailsServerSuchen(
         auswahl.konto,
-        bereich === "ordner" ? auswahl.ordner : null,
+        bereich === "ordner" && auswahl.konto !== null ? auswahl.ordner : null,
         begriff,
         feld,
       );
@@ -503,6 +568,7 @@ export class App {
       this.zustand.mails = ersetzen(this.zustand.mails);
       if (this.zustand.suche) this.zustand.suche = { ...this.zustand.suche, treffer: ersetzen(this.zustand.suche.treffer) };
       if (gleicheMail(this.zustand.offen, mail)) this.zustand.offen = geaendert;
+      if (mail.ordner === "INBOX") void this.ungelesenAktualisieren();
     } catch (fehler) {
       this.zustand.fehler = fehlertext(fehler);
     }
@@ -523,6 +589,7 @@ export class App {
         this.zustand.offen = null;
         this.zustand.inhalt = null;
       }
+      if (mail.ordner === "INBOX") void this.ungelesenAktualisieren();
       this.zustand.fehler = null;
     } catch (fehler) {
       this.zustand.fehler = fehlertext(fehler);
@@ -548,10 +615,19 @@ export class App {
     await this.mailEntfernen(mail, () => api.mailLoeschen(mail.konto, mail.ordner, mail.uid));
   }
 
-  /** Konto der aktuellen Auswahl (oder das erste). */
+  /** Konto der aktuellen Auswahl, sonst (z. B. in „Alle Posteingänge“) das Standardkonto (das erste). */
   private aktuellesKonto(): Konto | null {
     const id = this.zustand.auswahl?.konto;
     return this.zustand.konten.find((k) => k.id === id) ?? this.zustand.konten[0] ?? null;
+  }
+
+  /**
+   * Konto, zu dem die geöffnete Mail gehört: Antworten und Weiterleiten gehen immer über dieses
+   * Konto (Absender, Schlüssel, SMTP-Server) – auch im gemeinsamen Posteingang (#50).
+   */
+  private kontoDerMail(): Konto | null {
+    const id = this.zustand.offen?.konto;
+    return this.zustand.konten.find((k) => k.id === id) ?? null;
   }
 
   /** Öffnet das Verfassen-Fenster mit einem Entwurf (oder leer). */
@@ -569,13 +645,13 @@ export class App {
   }
 
   private antworten(mail: AufbereiteteMail, allen: boolean): void {
-    const konto = this.aktuellesKonto();
+    const konto = this.kontoDerMail();
     if (konto) this.verfassen(antwortEntwurf(mail, konto, allen));
   }
 
   private async weiterleiten(mail: AufbereiteteMail): Promise<void> {
     const { offen } = this.zustand;
-    const konto = this.aktuellesKonto();
+    const konto = this.kontoDerMail();
     if (!konto || !offen) return;
     const entwurf = weiterleitenEntwurf(mail, konto);
     if (mail.anhaenge.length > 0) {
@@ -592,7 +668,8 @@ export class App {
     this.meldungZeigen(ergebnis.hinweis ?? "Die Mail wurde gesendet.");
     // Der Ordner „Gesendet“ wurde eventuell gerade angelegt.
     for (const konto of this.zustand.konten) void this.ordnerLaden(konto.id);
-    const ordner = this.zustand.auswahl ? this.zustand.ordner.get(this.zustand.auswahl.konto) : undefined;
+    const auswahlKonto = this.zustand.auswahl?.konto;
+    const ordner = auswahlKonto ? this.zustand.ordner.get(auswahlKonto) : undefined;
     const aktuell = ordner?.find((o) => o.name === this.zustand.auswahl?.ordner);
     if (aktuell?.sonder === "gesendet") void this.mailsLaden(false);
   }
@@ -618,9 +695,32 @@ export class App {
     this.statusZeichnen();
   }
 
+  /** Eintrag „Alle Posteingänge“ oberhalb der Konten – erst ab zwei Konten (#50). */
+  private allePosteingaengeKnopf(): HTMLElement | null {
+    const { konten, auswahl, ungelesenAlle } = this.zustand;
+    if (konten.length < 2) return null;
+    const gewaehlt = auswahl?.konto === null;
+    const ungelesen = ungelesenAlle ?? 0;
+    const knopf = el(
+      "button",
+      {
+        type: "button",
+        class: gewaehlt ? "ordner-knopf alle-posteingaenge gewaehlt" : "ordner-knopf alle-posteingaenge",
+        "aria-current": gewaehlt ? "true" : undefined,
+        "aria-label": ungelesen > 0 ? `Alle Posteingänge, ${ungelesen} ungelesen` : "Alle Posteingänge",
+      },
+      el("span", {}, "Alle Posteingänge"),
+      ungelesen > 0 ? el("span", { class: "zaehler", "aria-hidden": "true" }, String(ungelesen)) : null,
+    );
+    knopf.addEventListener("click", () => void this.ordnerWaehlen({ ...ALLE_POSTEINGAENGE }));
+    return el("section", { class: "alle-bereich" }, knopf);
+  }
+
   private kontenZeichnen(): void {
     const { konten, ordner, ordnerFehler, auswahl } = this.zustand;
+    const alle = this.allePosteingaengeKnopf();
     this.kontenBereich.replaceChildren(
+      ...(alle ? [alle] : []),
       ...konten.map((konto) => {
         const bearbeiten = el("button", { type: "button", class: "klein" }, "Bearbeiten");
         bearbeiten.addEventListener("click", () => kontoDialogOeffnen(konto, () => void this.kontenLaden()));
@@ -647,10 +747,18 @@ export class App {
           liste.append(el("li", {}, knopf));
         }
         const fehler = ordnerFehler.get(konto.id);
+        const kennung = kontoKennung(konto, konten);
         return el(
           "section",
           { class: "konto" },
-          el("div", { class: "konto-name" }, konto.name),
+          el(
+            "div",
+            { class: "konto-name" },
+            konten.length > 1
+              ? el("span", { class: "konto-kuerzel", "data-farbe": String(kennung.farbe), "aria-hidden": "true" }, kennung.kuerzel)
+              : null,
+            konto.name,
+          ),
           el("div", { class: "konto-adresse" }, konto.email),
           fehler ? el("p", { class: "fehler klein-text" }, fehler) : null,
           liste,
@@ -670,7 +778,7 @@ export class App {
     const text = (wert: string, betroffen: boolean): Node[] =>
       suche && betroffen ? hervorheben(wert, suche.begriff) : [document.createTextNode(wert)];
     const absender = mail.absender || mail.absender_adresse || "(unbekannt)";
-    const ordner = suche?.bereich === "konto"
+    const ordner = suche?.bereich === "konto" && this.zustand.auswahl?.konto !== null
       ? (this.zustand.ordner.get(mail.konto) ?? []).find((o) => o.name === mail.ordner)?.anzeigename ?? mail.ordner
       : null;
     const zeile = el(
@@ -684,6 +792,9 @@ export class App {
         ...text(mail.betreff || "(kein Betreff)", suche?.feld !== "absender" && suche?.feld !== "inhalt"),
       ),
       ordner ? el("span", { class: "mail-ordner" }, `Ordner: ${ordner}`) : null,
+      this.zustand.auswahl?.konto === null
+        ? kontoMarke(this.zustand.konten.find((k) => k.id === mail.konto), this.zustand.konten)
+        : null,
     );
     zeile.addEventListener("click", () => void this.mailOeffnen(mail));
     return el("li", {}, zeile);
@@ -692,6 +803,8 @@ export class App {
   private listeZeichnen(): void {
     const { auswahl, mails, weitere, offline, laedt, fehler, konten, suche } = this.zustand;
     this.suchleiste.element.hidden = konten.length === 0 || !auswahl;
+    // „Alle Posteingänge“ durchsucht immer die Posteingänge aller Konten.
+    this.suchleiste.bereichWahl.hidden = auswahl?.konto === null;
     const teile: Node[] = [];
     if (fehler) teile.push(el("p", { class: "fehler", role: "alert" }, fehler));
     if (konten.length === 0) {
@@ -719,8 +832,17 @@ export class App {
       this.trefferZeichnen(suche, teile);
       return;
     }
+    const alle = auswahl.konto === null;
     if (offline) {
-      teile.push(el("p", { class: "hinweis-leiste" }, `Keine Verbindung zum Server – gespeicherte Mails werden angezeigt. ${offline}`));
+      teile.push(
+        el(
+          "p",
+          { class: "hinweis-leiste" },
+          alle
+            ? `Ältere Mails konnten nicht von allen Konten geladen werden. ${offline}`
+            : `Keine Verbindung zum Server – gespeicherte Mails werden angezeigt. ${offline}`,
+        ),
+      );
     }
     const liste = el("ul", { class: "mails" });
     for (const mail of mails) liste.append(this.mailZeile(mail, null));
@@ -728,7 +850,7 @@ export class App {
     if (laedt) {
       teile.push(el("p", { class: "leise" }, "Mails werden geladen …"));
     } else if (mails.length === 0) {
-      teile.push(el("p", { class: "leise" }, "Keine Mails in diesem Ordner."));
+      teile.push(el("p", { class: "leise" }, alle ? "Keine Mails in den Posteingängen." : "Keine Mails in diesem Ordner."));
     } else if (weitere) {
       const mehr = el("button", { type: "button", class: "breit" }, "Ältere Mails laden");
       mehr.addEventListener("click", () => void this.mailsLaden(true));
@@ -778,10 +900,13 @@ export class App {
   }
 
   private leseansichtZeichnen(): void {
-    const { offen, inhalt, nurText, hinweis } = this.zustand;
+    const { offen, inhalt, nurText, hinweis, auswahl, konten } = this.zustand;
     const ordner = offen ? this.zustand.ordner.get(offen.konto) : undefined;
+    // Im gemeinsamen Posteingang steht dabei, zu welchem Konto die Mail gehört (#50).
+    const kontoDerMail = konten.find((k) => k.id === offen?.konto);
+    const konto = auswahl?.konto === null && kontoDerMail ? `${kontoDerMail.name} <${kontoDerMail.email}>` : null;
     // Nur neu zeichnen, wenn sich etwas Sichtbares geändert hat (sonst würde das iframe neu geladen).
-    const stand = [offen?.konto, offen?.ordner, offen?.uid, offen?.gelesen, inhalt, nurText, hinweis, ordner];
+    const stand = [offen?.konto, offen?.ordner, offen?.uid, offen?.gelesen, inhalt, nurText, hinweis, ordner, konto];
     if (stand.length === this.gezeichnet.length && stand.every((wert, i) => wert === this.gezeichnet[i])) {
       return;
     }
@@ -791,7 +916,7 @@ export class App {
       return;
     }
     this.leseBereich.replaceChildren(
-      leseansicht(offen, offen.ordner, ordner ?? [], inhalt ?? { art: "laedt" }, { nurText, hinweis }, {
+      leseansicht(offen, offen.ordner, ordner ?? [], inhalt ?? { art: "laedt" }, { nurText, hinweis, konto }, {
         antworten: (mail, allen) => this.antworten(mail, allen),
         weiterleiten: (mail) => void this.weiterleiten(mail),
         gelesenUmschalten: () => void this.gelesenSetzen(offen, !offen.gelesen),

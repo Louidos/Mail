@@ -144,6 +144,22 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
 - Die Oberfläche zeigt die Mailliste sofort aus dem Speicher (`mails_lokal`) und gleicht danach mit dem Server ab.
   Der Beobachter lädt die Inhalte der neuesten 50 Mails im Posteingang (bis 5 MB je Mail) für das Lesen ohne Internet vor.
 
+## Gemeinsamer Posteingang (#50)
+
+- `MailCache::ueber_konten` liest die Mails eines Ordners (hier `INBOX`) mehrerer Konten in einer Abfrage,
+  sortiert nach Datum (ohne Datum am Ende, dann UID), seitenweise mit `LIMIT`/`OFFSET`; `MailCache::ungelesen`
+  zählt ungelesene. In SQLCipher eine `SELECT … WHERE konto IN (…) AND ordner = ?` mit Parametern.
+- `ImapDienst::alle_posteingaenge` (Befehl `alle_posteingaenge`) liest nur lokal. Mit `nachladen`
+  („Ältere Mails laden“) ruft es für jedes Konto `mails_seite` ab dessen Anzahl gespeicherter Mails auf (bestehende
+  Befehlsverbindung, `UID SEARCH`/`FETCH` für Älteres); ein Konto ohne Verbindung ergibt nur einen Hinweis. Live
+  aktualisiert die Oberfläche bei jedem `mails_geaendert` für `INBOX` eines Kontos.
+- Suche: `mails_suchen`/`mails_server_suchen` ohne Konto durchsuchen die `INBOX` aller Konten
+  (`ImapDienst::server_suchen_posteingaenge` je Konto über dessen Verbindung, Treffer nach Datum zusammengeführt).
+- Oberfläche: Auswahl `{ konto: null, ordner: "INBOX" }` in `src/app.ts`; Eintrag nur ab zwei Konten.
+  `src/postfach/konten.ts` bildet Kürzel, Namen (bei gleichen Namen die Adresse) und Kontofarbe (`--konto-1` …
+  `--konto-6`, hell und dunkel, mindestens 3:1 gegen die Flächen – `tests/design.test.ts`). Antworten und
+  Weiterleiten nehmen das Konto der geöffneten Mail (`kontoDerMail`), „Neue Mail“ das erste Konto.
+
 ## Mails senden (`smtp`)
 
 - **Verbindung** wie bei IMAP über `tls` (TLS oder STARTTLS-Pflicht, gleiches Pinning), danach Übergabe an `lettre`.

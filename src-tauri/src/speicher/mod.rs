@@ -730,12 +730,68 @@ impl MailCache for SqlCache {
             Ok(treffer)
         })
     }
+
+    fn ueber_konten(
+        &self,
+        konten: &[String],
+        ordner: &str,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<Vec<MailEintrag>, Fehlermeldung> {
+        if konten.is_empty() || anzahl == 0 {
+            return Ok(Vec::new());
+        }
+        let platzhalter = vec!["?"; konten.len()].join(", ");
+        let mut werte: Vec<Value> = konten.iter().cloned().map(Value::Text).collect();
+        werte.push(Value::Text(ordner.to_string()));
+        werte.push(Value::Integer(i64::try_from(anzahl).unwrap_or(i64::MAX)));
+        werte.push(Value::Integer(i64::try_from(start).unwrap_or(i64::MAX)));
+        let sql = format!(
+            "SELECT m.konto, m.ordner, {KOPF_SPALTEN_M} FROM mails m
+             WHERE m.konto IN ({platzhalter}) AND m.ordner = ?
+             ORDER BY m.datum IS NULL, m.datum DESC, m.uid DESC
+             LIMIT ? OFFSET ?"
+        );
+        self.mit(|v| {
+            let mut anweisung = v.prepare(&sql)?;
+            let mails = anweisung
+                .query_map(params_from_iter(werte), |z| {
+                    Ok(MailEintrag {
+                        konto: z.get(0)?,
+                        ordner: z.get(1)?,
+                        kopf: kopf_ab(z, 2)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(mails)
+        })
+    }
+
+    fn ungelesen(&self, konten: &[String], ordner: &str) -> Result<usize, Fehlermeldung> {
+        if konten.is_empty() {
+            return Ok(0);
+        }
+        let platzhalter = vec!["?"; konten.len()].join(", ");
+        let mut werte: Vec<Value> = konten.iter().cloned().map(Value::Text).collect();
+        werte.push(Value::Text(ordner.to_string()));
+        self.mit(|v| {
+            let anzahl: i64 = v.query_row(
+                &format!(
+                    "SELECT count(*) FROM mails
+                     WHERE konto IN ({platzhalter}) AND ordner = ? AND gelesen = 0"
+                ),
+                params_from_iter(werte),
+                |z| z.get(0),
+            )?;
+            Ok(usize::try_from(anzahl).unwrap_or(0))
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imap::cache::tests::{kopf, suche_pruefen, verhalten_pruefen};
+    use crate::imap::cache::tests::{kopf, suche_pruefen, ueber_konten_pruefen, verhalten_pruefen};
     use crate::konto::schluesselbund::SpeicherSchluesselbund;
     use crate::speicher::suche::{SuchFeld, SuchOrt};
 
@@ -777,6 +833,13 @@ mod tests {
             optionen.iter().any(|o| o.starts_with("HAS_CODEC")),
             "SQLCipher: {optionen:?}"
         );
+    }
+
+    #[test]
+    fn gemeinsamer_posteingang_im_verschluesselten_speicher() {
+        let ordner = tempfile::tempdir().unwrap();
+        let cache = SqlCache::oeffnen(&ordner.path().join(DATEINAME), &schluessel(10)).unwrap();
+        ueber_konten_pruefen(&cache);
     }
 
     #[test]
