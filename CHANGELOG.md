@@ -7,6 +7,8 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+## 0.5.0 – 2026-10-20
+
 ### Hinzugefügt
 
 - Gemeinsamer Posteingang „Alle Posteingänge“ zeigt die Mails aller Konten in einer Liste; Antworten gehen immer über das passende Konto. Jede Mail ist mit Kürzel und Namen ihres Kontos gekennzeichnet, der Eintrag erscheint ab zwei Konten (#50)
