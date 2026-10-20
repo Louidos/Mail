@@ -69,6 +69,19 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 - Beim Entfernen eines Kontos werden seine Einträge sofort aus allen Teilen des Index entfernt; „Lokalen Speicher
   leeren“ legt den Index neu an.
 
+### Gemeinsamer Posteingang (#50)
+
+- **Keine neuen Verbindungen**: „Alle Posteingänge“ liest nur aus dem lokalen Speicher. Neue Mails bringen die
+  bestehenden Beobachter (IDLE) der Konten; „Ältere Mails laden“ und Aktionen laufen über die bestehende
+  Befehlsverbindung des jeweiligen Kontos zu dessen eigenem Server. Ein Integrationstest prüft, dass die Ansicht
+  auch ohne Netz zu einem Konto vollständig aus dem Speicher kommt.
+- **Antwort immer über das Konto der Mail**: Antworten und Weiterleiten setzen das Konto der ursprünglichen Mail –
+  Absenderadresse, eigener OpenPGP-Schlüssel bzw. eigenes S/MIME-Zertifikat und SMTP-Server stammen von diesem
+  Konto, auch wenn ein anderes Konto das Standardkonto ist. Das Konto steht sichtbar unter „Von“. Der Versand wählt
+  den SMTP-Server immer anhand des Kontos im Entwurf (Integrationstest mit zwei Konten).
+- Aktionen (gelesen, verschieben, löschen) gehen immer an das Konto und den Ordner der Mail, nie an ein anderes.
+- Die Kontofarbe ist nie die einzige Kennzeichnung: Kürzel und Kontoname stehen als Text dabei.
+
 ### Anzeige von Mails
 
 - HTML wird im Backend mit `ammonia` bereinigt (Positivliste): keine Skripte, Formulare, iframes, Objekte, SVG,

@@ -37,6 +37,14 @@
   --warnung-flaeche: #fffbeb;
   --erfolg: #15803d;
 
+  /* Kontofarben im gemeinsamen Posteingang (#50) – nie die einzige Kennzeichnung */
+  --konto-1: #2563eb;
+  --konto-2: #c2410c;
+  --konto-3: #15803d;
+  --konto-4: #7e22ce;
+  --konto-5: #be185d;
+  --konto-6: #0e7490;
+
   /* Mailinhalt im abgeschotteten iframe */
   --mail-grund: #ffffff;
   --mail-text: #1f2937;
@@ -97,6 +105,13 @@
     --warnung-flaeche: #451a03;
     --erfolg: #4ade80;
 
+    --konto-1: #60a5fa;
+    --konto-2: #fb923c;
+    --konto-3: #4ade80;
+    --konto-4: #c084fc;
+    --konto-5: #f472b6;
+    --konto-6: #22d3ee;
+
     /* Mailinhalt bleibt hell, nur der Rahmen drumherum ist dunkel */
     --mail-grund: #ffffff;
     --mail-text: #1f2937;
@@ -132,6 +147,13 @@
   --warnung: #fcd34d;
   --warnung-flaeche: #451a03;
   --erfolg: #4ade80;
+
+  --konto-1: #60a5fa;
+  --konto-2: #fb923c;
+  --konto-3: #4ade80;
+  --konto-4: #c084fc;
+  --konto-5: #f472b6;
+  --konto-6: #22d3ee;
 
   /* Mailinhalt bleibt hell, nur der Rahmen drumherum ist dunkel */
   --mail-grund: #ffffff;
@@ -578,6 +600,86 @@ button.mail mark {
 button.mail:hover .mail-ordner,
 button.mail.offen .mail-ordner {
   color: var(--text);
+}
+
+/* Gemeinsamer Posteingang (#50): Kürzel mit Kontofarbe und Kontoname als Text */
+
+.alle-posteingaenge {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+
+.zaehler {
+  min-width: 1.5em;
+  padding: 0 var(--abstand-2);
+  border-radius: var(--radius-rund);
+  background: var(--blau);
+  color: var(--auf-farbe);
+  font-size: var(--groesse-klein);
+  text-align: center;
+}
+
+.konto-kuerzel[data-farbe="1"] {
+  border-color: var(--konto-1);
+}
+
+.konto-kuerzel[data-farbe="2"] {
+  border-color: var(--konto-2);
+}
+
+.konto-kuerzel[data-farbe="3"] {
+  border-color: var(--konto-3);
+}
+
+.konto-kuerzel[data-farbe="4"] {
+  border-color: var(--konto-4);
+}
+
+.konto-kuerzel[data-farbe="5"] {
+  border-color: var(--konto-5);
+}
+
+.konto-kuerzel[data-farbe="6"] {
+  border-color: var(--konto-6);
+}
+
+.konto-kuerzel {
+  display: inline-block;
+  min-width: 2em;
+  margin-right: var(--abstand-1);
+  padding: 0 var(--abstand-1);
+  border: 2px solid var(--linie);
+  border-radius: var(--radius-klein);
+  color: var(--text);
+  font-size: var(--groesse-klein);
+  font-weight: 700;
+  text-align: center;
+}
+
+.mail-konto {
+  grid-column: 1 / -1;
+  color: var(--text-leise);
+  font-size: var(--groesse-klein);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.mail:hover .mail-konto,
+button.mail.offen .mail-konto {
+  color: var(--text);
+}
+
+/* Nur für Bildschirmleser */
+.unsichtbar {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* Leseansicht */

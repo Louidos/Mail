@@ -30,6 +30,7 @@ Version: **0.4.0** (siehe [Releases](https://github.com/Louidos/Mail/releases))
 - [x] Dunkle Darstellung (automatisch oder von Hand)
 - [x] Fertige Installationspakete für Windows, macOS und Linux in jedem Release
 - [x] Suche in Mails (lokal im verschlüsselten Speicher, auf Wunsch auf dem Server)
+- [x] Gemeinsamer Posteingang für mehrere Konten
 
 Änderungen stehen im [CHANGELOG](CHANGELOG.md).
 
@@ -44,7 +45,7 @@ Wer einen Punkt erledigt, hakt ihn im selben PR hier ab bzw. entfernt ihn.
 
 **Geplant:**
 
-- [ ] Gemeinsamer Posteingang für mehrere Konten ([#50](https://github.com/Louidos/Mail/issues/50))
+- Zurzeit ist nichts geplant. Ideen und Wünsche bitte als [Issue](https://github.com/Louidos/Mail/issues) melden.
 
 **Bewusst nicht geplant** (siehe [Sicherheitskonzept](docs/sicherheit.md#was-bewusst-nicht-abgedeckt-ist)):
 

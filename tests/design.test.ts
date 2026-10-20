@@ -92,6 +92,21 @@ describe("Design", () => {
     regelblock(block, /^:root\[data-darstellung="dunkel"\],\s*:root\[data-darstellung="dunkel"\] ::backdrop\s*\{/m),
   );
 
+  it("Kontofarben (#50) sind in beiden Darstellungen gut sichtbar (mindestens 3:1)", () => {
+    for (const [name, farben] of [
+      ["hell", hell],
+      ["dunkel", dunkelVonHand],
+    ] as const) {
+      for (let i = 1; i <= 6; i++) {
+        const farbe = farben.get(`--konto-${i}`);
+        expect(farbe, `${name}: --konto-${i}`).toBeDefined();
+        for (const grund of ["--grund", "--flaeche", "--blau-hell"]) {
+          expect(kontrast(farbe!, farben.get(grund)!), `${name}: --konto-${i} auf ${grund}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    }
+  });
+
   it("legt die Farben zentral fest", () => {
     expect(block).toMatch(/^\s*:root,\s*::backdrop\s*\{/m);
     for (const farbe of ["#2563eb", "#1d4ed8", "#eff6ff", "#dbeafe", "#ffffff", "#1f2937", "#6b7280", "#e5e7eb"]) {

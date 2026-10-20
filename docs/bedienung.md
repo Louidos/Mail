@@ -71,6 +71,26 @@ erneuert, musst du das neue hinterlegen.
   und keine doppelt erscheint.
 - Ist der Server nicht erreichbar, zeigt SicherMail die bereits geladenen Mails und einen Hinweis.
 
+### Alle Posteingänge (mehrere Konten)
+
+Sobald zwei oder mehr Konten eingerichtet sind, steht oben in der Seitenleiste **Alle Posteingänge** – mit der
+Zahl der ungelesenen Mails aller Posteingänge.
+
+- Die Liste zeigt die Posteingänge aller Konten gemeinsam, neueste zuerst. Jede Zeile nennt ihr **Konto**: ein
+  Kürzel (z. B. „AM“ für „Anna Muster“) mit der Farbe des Kontos und dazu den Kontonamen (bei gleichen Namen die
+  Adresse). Das gleiche Kürzel steht in der Seitenleiste beim Konto. Beim Lesen steht das Konto bei den Kopfdaten.
+- Neue Mails erscheinen von selbst; SicherMail öffnet dafür keine zusätzlichen Verbindungen.
+  **Ältere Mails laden** holt bei jedem Konto ältere Mails nach.
+- Öffnen, gelesen/ungelesen, Verschieben und Löschen wirken immer auf das Konto, zu dem die Mail gehört.
+- **Antworten**, **Allen antworten** und **Weiterleiten** verwenden immer das Konto der ursprünglichen Mail:
+  Absenderadresse, OpenPGP-Schlüssel bzw. S/MIME-Zertifikat und den Postausgangsserver dieses Kontos. Unter
+  **Von** im Verfassen-Fenster siehst du das Konto und kannst es bewusst ändern.
+- **Neue Mail** nimmt hier das erste Konto in der Seitenleiste (Standardkonto); unter **Von** lässt sich ein
+  anderes wählen.
+- Die **Suche** durchsucht in dieser Ansicht die Posteingänge aller Konten (lokal und mit **Auf dem Server
+  suchen** bei jedem Konto über dessen eigene Verbindung).
+- Es gibt nur die Posteingänge, keine anderen Ordner. Mit nur einem Konto erscheint der Eintrag nicht.
+
 ### Mails bearbeiten
 
 Eine Mail anklicken öffnet sie rechts und markiert sie als gelesen. Darüber:

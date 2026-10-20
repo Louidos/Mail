@@ -9,6 +9,7 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ### Hinzugefügt
 
+- Gemeinsamer Posteingang „Alle Posteingänge“ zeigt die Mails aller Konten in einer Liste; Antworten gehen immer über das passende Konto. Jede Mail ist mit Kürzel und Namen ihres Kontos gekennzeichnet, der Eintrag erscheint ab zwei Konten (#50)
 - Mails lassen sich nach Absender, Betreff und Inhalt durchsuchen, lokal und auf Wunsch auf dem Server; der Suchindex ist verschlüsselt. Das Suchfeld steht über der Mailliste (Ctrl/Cmd+F), Treffer sind hervorgehoben, auch Mails von vor dem Update werden gefunden (#49)
 
 ## 0.4.0 – 2026-10-19
