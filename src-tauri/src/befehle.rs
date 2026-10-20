@@ -30,6 +30,7 @@ use crate::smime::SmimeDienst;
 use crate::smtp::anhaenge::{AnhangAuswahl, Eintrag, Quelle};
 use crate::smtp::dienst::{SendeDienst, SendeErgebnis};
 use crate::smtp::entwurf::Entwurf;
+use crate::speicher::suche::{SuchFeld, SuchOrt, SuchSeite, Suche};
 use crate::speicher::{self, SqlCache};
 
 /// Höchstens so viele Mails pro Seite.
@@ -172,6 +173,43 @@ pub async fn mails_lokal(
     zustand
         .imap
         .mails_lokal(&konto, &ordner, start, anzahl.clamp(1, MAX_SEITE))
+}
+
+/// Lokale Suche (#49) im verschlüsselten Speicher: im Ordner `ordner` oder – ohne Ordner – in
+/// allen Ordnern des Kontos. Geht nie ans Netz.
+#[tauri::command]
+pub async fn mails_suchen(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: Option<String>,
+    begriff: String,
+    feld: SuchFeld,
+    start: usize,
+    anzahl: usize,
+) -> Result<SuchSeite, Fehlermeldung> {
+    let suche = Suche {
+        begriff,
+        feld,
+        orte: vec![SuchOrt { konto, ordner }],
+    };
+    let imap = zustand.imap.clone();
+    blockierend(move || imap.suchen(&suche, start, anzahl.clamp(1, MAX_SEITE))).await
+}
+
+/// Suche auf dem Server (#49) mit `UID SEARCH` – nur auf ausdrücklichen Klick, nur über die
+/// Verbindung des Kontos.
+#[tauri::command]
+pub async fn mails_server_suchen(
+    zustand: State<'_, AppZustand>,
+    konto: String,
+    ordner: Option<String>,
+    begriff: String,
+    feld: SuchFeld,
+) -> Result<SuchSeite, Fehlermeldung> {
+    zustand
+        .imap
+        .server_suchen(&konto, ordner.as_deref(), &begriff, feld)
+        .await
 }
 
 #[tauri::command]

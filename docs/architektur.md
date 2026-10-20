@@ -115,6 +115,32 @@ Alle Verbindungen zu Mailservern baut `tls` auf:
   wird die Datei verworfen und neu angelegt.
 - `PRAGMA secure_delete = ON`, Dateirechte `0600`. „Lokalen Speicher leeren“ löscht alle Zeilen und führt `VACUUM` aus.
 - Tabellen `ordner_stand` (UIDVALIDITY/UIDNEXT je Ordner) und `mails` (Kopfdaten und optional Inhalt je UID).
+- **Suchindex** (#49, Schema-Version 2, `PRAGMA user_version`): FTS5-Tabelle `mails_suche` (`absender`, `betreff`,
+  `text`; Tokenizer `unicode61 remove_diacritics 2`) in derselben Datei. Die Zeilennummer steht in der Spalte
+  `mails.suche_id` (mit Index); der Trigger `mails_suche_entfernen` löscht den Eintrag mit der Mail, sodass alle
+  Wege (Entfernen, neue UIDVALIDITY, Konto löschen) den Index mitnehmen. `SqlCache` trägt neue Köpfe ein, übernimmt
+  geänderte Kopfdaten und setzt beim Speichern des Inhalts den Text (`speicher::suche::suchtext`: Textteil von
+  `mail-parser`, höchstens 100 000 Zeichen; leer bei `multipart/encrypted`, `application/(x-)pkcs7-mime` oder
+  Inline-PGP in irgendeinem Teil).
+- **Migration** (additiv): Beim Öffnen werden fehlende Spalte, Tabelle, Index und Trigger angelegt und alle Mails
+  ohne `suche_id` eingetragen – beim ersten Start nach dem Update also alle schon gespeicherten. Ältere Versionen
+  können die Datei weiter öffnen (zusätzliche Spalte und Trigger stören sie nicht); was sie ohne Index speichern,
+  wird beim nächsten Start nachgetragen. Das verwendete SQLCipher (`libsqlite3-sys`, gebündelt) ist mit
+  `SQLITE_ENABLE_FTS5` gebaut; ein Test prüft das über `PRAGMA compile_options`.
+- **Abfrage**: `speicher::suche::fts_ausdruck` macht aus jedem Wort `"wort"*` (innere `"` verdoppelt), optional mit
+  Spaltenfilter `{betreff} : (…)`; Konto, Ordner, Grenze und Versatz sind SQL-Parameter. Sortiert nach Datum,
+  200 Treffer je Seite (`mails_suchen`). Der Zwischenspeicher im Arbeitsspeicher sucht ohne Index (Teilwort,
+  Gross-/Kleinschreibung egal).
+- **Server-Suche** (`imap::suche`, Befehl `mails_server_suchen`): `UID SEARCH` mit `FROM`, `SUBJECT`, `BODY` (bei
+  „Alle“ mit `OR` verknüpft) je Wort und `UNDELETED`. ASCII-Wörter als String in Anführungszeichen; Wörter mit `\`
+  oder Nicht-ASCII als synchrones Literal (`{n}`, Warten auf `+`, mit `CHARSET UTF-8` bei Nicht-ASCII);
+  Anführungszeichen trennen Wörter. Die Antwort wird mit `read_response` gelesen. Die neuesten 200 UIDs je Ordner;
+  fehlende Köpfe holt `UID FETCH`, sie werden nicht in den Zwischenspeicher übernommen (sonst übersprünge
+  „Ältere Mails laden“ die Lücke).
+- **Oberfläche** (`src/postfach/suche.ts`): Suchleiste über der Mailliste (bleibt beim Neuzeichnen bestehen, damit
+  Eingabe und Fokus erhalten bleiben), 300 ms Verzögerung, Ctrl/Cmd+F, Hervorheben mit `<mark>` ohne HTML. Einträge
+  der Mailliste und Treffer sind `MailEintrag` (Konto, Ordner, Kopfdaten); Öffnen, Markieren, Verschieben und
+  Löschen verwenden Konto und Ordner der Mail, nicht die Auswahl in der Seitenleiste.
 - Die Oberfläche zeigt die Mailliste sofort aus dem Speicher (`mails_lokal`) und gleicht danach mit dem Server ab.
   Der Beobachter lädt die Inhalte der neuesten 50 Mails im Posteingang (bis 5 MB je Mail) für das Lesen ohne Internet vor.
 

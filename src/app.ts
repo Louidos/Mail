@@ -7,10 +7,12 @@ import {
   type AufbereiteteMail,
   type Entwurf,
   type Konto,
+  type MailEintrag,
   type MailEreignis,
   type MailKopf,
   type Ordner,
   type SendeErgebnis,
+  type SuchFeld,
   type Verfahren,
 } from "./api";
 import { bestaetigen } from "./dialoge";
@@ -24,6 +26,7 @@ import { kontoDialogOeffnen } from "./konto/dialog";
 import { datumKurz, ordnerKurzname, ordnerTiefe } from "./postfach/format";
 import { leseansicht, type Inhalt } from "./postfach/lesen";
 import { linkPruefen, type LinkKlick } from "./postfach/sicher";
+import { hervorheben, SUCH_SEITE, Suchleiste, suchwoerter, type SuchBereich } from "./postfach/suche";
 
 /** So viele Mails werden pro Seite geladen. */
 export const SEITENGROESSE = 50;
@@ -42,6 +45,24 @@ interface Auswahl {
   ordner: string;
 }
 
+/** Dieselbe Mail (Konto, Ordner und UID)? */
+export function gleicheMail(a: MailEintrag | null | undefined, b: MailEintrag | null | undefined): boolean {
+  return !!a && !!b && a.konto === b.konto && a.ordner === b.ordner && a.uid === b.uid;
+}
+
+/** Laufende Suche (#49). */
+interface SuchZustand {
+  begriff: string;
+  feld: SuchFeld;
+  bereich: SuchBereich;
+  /** Treffer vom Server statt aus dem lokalen Speicher. */
+  server: boolean;
+  treffer: MailEintrag[];
+  weitere: boolean;
+  laedt: boolean;
+  fehler: string | null;
+}
+
 interface Zustand {
   konten: Konto[];
   ordner: Map<string, Ordner[]>;
@@ -49,11 +70,13 @@ interface Zustand {
   /** Meldung pro Konto, wenn die Verbindung unterbrochen ist. */
   verbindung: Map<string, string>;
   auswahl: Auswahl | null;
-  mails: MailKopf[];
+  mails: MailEintrag[];
   weitere: boolean;
   offline: string | null;
   laedt: boolean;
-  offen: MailKopf | null;
+  offen: MailEintrag | null;
+  /** Aktive Suche; `null` zeigt die normale Mailliste. */
+  suche: SuchZustand | null;
   /** Inhalt der geöffneten Mail. */
   inhalt: Inhalt | null;
   /** „Nur Text anzeigen“ */
@@ -75,6 +98,7 @@ export class App {
     offline: null,
     laedt: false,
     offen: null,
+    suche: null,
     inhalt: null,
     nurText: false,
     hinweis: null,
@@ -85,7 +109,20 @@ export class App {
   private gezeichnet: unknown[] = [];
 
   private readonly kontenBereich = el("nav", { class: "konten", "aria-label": "Konten und Ordner" });
-  private readonly listenBereich = el("section", { class: "mailliste", "aria-label": "Mails" });
+  private readonly listenInhalt = el("div", { class: "listen-inhalt" });
+  private readonly suchleiste = new Suchleiste({
+    suchen: () => void this.lokalSuchen("neu"),
+    serverSuchen: () => void this.serverSuchen(),
+    beenden: () => this.sucheBeenden(),
+  });
+  private readonly listenBereich = el(
+    "section",
+    { class: "mailliste", "aria-label": "Mails" },
+    this.suchleiste.element,
+    this.listenInhalt,
+  );
+  /** Zählt Suchanfragen, damit verspätete Antworten älterer Anfragen verworfen werden. */
+  private suchNummer = 0;
   private readonly leseBereich = el("section", { class: "lesebereich", "aria-label": "Mail lesen" });
   private readonly statusLeiste = el("div", { class: "statusleiste", role: "status", "aria-live": "polite" });
 
@@ -116,6 +153,15 @@ export class App {
     );
     this.zeichnen();
 
+    // Ctrl+F (macOS: Cmd+F) springt ins Suchfeld – nicht, solange ein Dialog offen ist.
+    document.addEventListener("keydown", (ereignis) => {
+      if ((ereignis.ctrlKey || ereignis.metaKey) && !ereignis.altKey && ereignis.key.toLowerCase() === "f") {
+        if (document.querySelector("dialog[open]") || this.suchleiste.element.hidden) return;
+        ereignis.preventDefault();
+        this.suchleiste.fokussieren();
+      }
+    });
+
     try {
       await listen<MailEreignis>(MAIL_EREIGNIS, (ereignis) => this.ereignis(ereignis.payload));
     } catch {
@@ -131,6 +177,10 @@ export class App {
       case "mails_geaendert":
         if (auswahl && auswahl.konto === ereignis.konto && auswahl.ordner === ereignis.ordner) {
           void this.mailsLaden(false);
+        }
+        // Lokale Treffer aktuell halten (die Server-Suche wird nur auf Klick wiederholt).
+        if (this.zustand.suche && !this.zustand.suche.server && auswahl?.konto === ereignis.konto) {
+          void this.lokalSuchen("auffrischen");
         }
         break;
       case "verbunden":
@@ -166,6 +216,7 @@ export class App {
       this.zustand.auswahl = null;
       this.zustand.mails = [];
       this.zustand.offen = null;
+      this.sucheBeenden();
     }
     // Den Posteingang gibt es immer – er ist sofort wählbar, auch ohne Verbindung.
     for (const konto of this.zustand.konten) {
@@ -190,6 +241,8 @@ export class App {
   }
 
   private async ordnerWaehlen(auswahl: Auswahl): Promise<void> {
+    // Ein anderer Ordner beendet die Suche und zeigt seine Mails.
+    if (this.zustand.suche) this.sucheBeenden();
     this.zustand.auswahl = auswahl;
     this.zustand.mails = [];
     this.zustand.offen = null;
@@ -205,13 +258,15 @@ export class App {
     if (!auswahl) return;
     const start = mehr ? this.zustand.mails.length : 0;
     const anzahl = mehr ? SEITENGROESSE : Math.max(SEITENGROESSE, this.zustand.mails.length);
+    const eintraege = (mails: MailKopf[]): MailEintrag[] =>
+      mails.map((m) => ({ ...m, konto: auswahl.konto, ordner: auswahl.ordner }));
     this.zustand.laedt = true;
     // Erste Seite sofort aus dem lokalen Speicher zeigen, dann mit dem Server abgleichen.
     if (!mehr && this.zustand.mails.length === 0) {
       try {
         const lokal = await api.mailsLokal(auswahl.konto, auswahl.ordner, 0, anzahl);
         if (this.zustand.auswahl === auswahl && lokal.mails.length > 0) {
-          this.zustand.mails = lokal.mails;
+          this.zustand.mails = eintraege(lokal.mails);
           this.zustand.weitere = lokal.weitere;
         }
       } catch {
@@ -222,13 +277,15 @@ export class App {
     try {
       const seite = await api.mailsAuflisten(auswahl.konto, auswahl.ordner, start, anzahl);
       if (this.zustand.auswahl !== auswahl) return;
-      this.zustand.mails = mehr ? [...this.zustand.mails, ...seite.mails] : seite.mails;
+      this.zustand.mails = mehr ? [...this.zustand.mails, ...eintraege(seite.mails)] : eintraege(seite.mails);
       this.zustand.weitere = seite.weitere;
       this.zustand.offline = seite.offline;
       this.zustand.fehler = null;
-      if (this.zustand.offen) {
-        const uid = this.zustand.offen.uid;
-        this.zustand.offen = this.zustand.mails.find((m) => m.uid === uid) ?? null;
+      // Die geöffnete Mail aktualisieren – nur, wenn sie in diesem Ordner liegt (Suchtreffer können
+      // aus anderen Ordnern stammen).
+      const offen = this.zustand.offen;
+      if (offen && offen.konto === auswahl.konto && offen.ordner === auswahl.ordner) {
+        this.zustand.offen = this.zustand.mails.find((m) => gleicheMail(m, offen)) ?? null;
       }
     } catch (fehler) {
       this.zustand.fehler = fehlertext(fehler);
@@ -238,7 +295,90 @@ export class App {
     }
   }
 
-  private async mailOeffnen(mail: MailKopf): Promise<void> {
+  /** Lokale Suche (#49): neu, nächste Seite („mehr“) oder still aktualisieren („auffrischen“). */
+  private async lokalSuchen(art: "neu" | "mehr" | "auffrischen"): Promise<void> {
+    const auswahl = this.zustand.auswahl;
+    const begriff = this.suchleiste.begriff;
+    if (!auswahl || suchwoerter(begriff).length === 0) {
+      if (art === "neu") this.sucheBeenden(false);
+      return;
+    }
+    const vorher = this.zustand.suche;
+    const feld = this.suchleiste.suchFeld;
+    const bereich = this.suchleiste.bereich;
+    const bisher = vorher && !vorher.server ? vorher.treffer : [];
+    const start = art === "mehr" ? bisher.length : 0;
+    const anzahl = art === "auffrischen" ? Math.max(SUCH_SEITE, bisher.length) : SUCH_SEITE;
+    const nr = ++this.suchNummer;
+    this.zustand.suche = {
+      begriff,
+      feld,
+      bereich,
+      server: false,
+      treffer: art === "neu" ? [] : bisher,
+      weitere: art === "neu" ? false : (vorher?.weitere ?? false),
+      laedt: art !== "auffrischen",
+      fehler: null,
+    };
+    this.suchleiste.aktivSetzen(true);
+    this.listeZeichnen();
+    let ergebnis: Partial<SuchZustand>;
+    try {
+      const seite = await api.mailsSuchen(
+        auswahl.konto,
+        bereich === "ordner" ? auswahl.ordner : null,
+        begriff,
+        feld,
+        start,
+        anzahl,
+      );
+      ergebnis = { treffer: art === "mehr" ? [...bisher, ...seite.mails] : seite.mails, weitere: seite.weitere };
+    } catch (fehler) {
+      ergebnis = { fehler: fehlertext(fehler) };
+    }
+    if (nr !== this.suchNummer || !this.zustand.suche) return;
+    this.zustand.suche = { ...this.zustand.suche, ...ergebnis, laedt: false };
+    this.listeZeichnen();
+  }
+
+  /** Suche auf dem eigenen Server – nur nach Klick auf „Auf dem Server suchen“. */
+  private async serverSuchen(): Promise<void> {
+    const auswahl = this.zustand.auswahl;
+    const begriff = this.suchleiste.begriff;
+    if (!auswahl || suchwoerter(begriff).length === 0) return;
+    const feld = this.suchleiste.suchFeld;
+    const bereich = this.suchleiste.bereich;
+    const nr = ++this.suchNummer;
+    this.zustand.suche = { begriff, feld, bereich, server: true, treffer: [], weitere: false, laedt: true, fehler: null };
+    this.suchleiste.aktivSetzen(true);
+    this.listeZeichnen();
+    let ergebnis: Partial<SuchZustand>;
+    try {
+      const seite = await api.mailsServerSuchen(
+        auswahl.konto,
+        bereich === "ordner" ? auswahl.ordner : null,
+        begriff,
+        feld,
+      );
+      ergebnis = { treffer: seite.mails, weitere: seite.weitere };
+    } catch (fehler) {
+      ergebnis = { fehler: fehlertext(fehler) };
+    }
+    if (nr !== this.suchNummer || !this.zustand.suche) return;
+    this.zustand.suche = { ...this.zustand.suche, ...ergebnis, laedt: false };
+    this.listeZeichnen();
+  }
+
+  /** Beendet die Suche und zeigt wieder die Mailliste des Ordners. */
+  private sucheBeenden(feldLeeren = true): void {
+    this.suchNummer++;
+    this.zustand.suche = null;
+    if (feldLeeren) this.suchleiste.leeren();
+    this.suchleiste.aktivSetzen(false);
+    this.listeZeichnen();
+  }
+
+  private async mailOeffnen(mail: MailEintrag): Promise<void> {
     this.zustand.offen = mail;
     this.zustand.hinweis = null;
     const laden = this.inhaltLaden(false);
@@ -250,18 +390,18 @@ export class App {
 
   /** Lädt den bereinigten Inhalt der geöffneten Mail (optional mit externen Inhalten). */
   private async inhaltLaden(externLaden: boolean): Promise<void> {
-    const { auswahl, offen } = this.zustand;
-    if (!auswahl || !offen) return;
+    const { offen } = this.zustand;
+    if (!offen) return;
     this.zustand.inhalt = { art: "laedt" };
     this.zeichnen();
     let inhalt: Inhalt;
     try {
-      inhalt = { art: "fertig", mail: await api.mailAnzeigen(auswahl.konto, auswahl.ordner, offen.uid, externLaden) };
+      inhalt = { art: "fertig", mail: await api.mailAnzeigen(offen.konto, offen.ordner, offen.uid, externLaden) };
     } catch (fehler) {
       inhalt = { art: "fehler", meldung: fehlertext(fehler) };
     }
     // Inzwischen eine andere Mail geöffnet? Dann verwerfen.
-    if (this.zustand.offen?.uid !== offen.uid || this.zustand.auswahl !== auswahl) return;
+    if (!gleicheMail(this.zustand.offen, offen)) return;
     this.zustand.inhalt = inhalt;
     this.zeichnen();
   }
@@ -288,10 +428,10 @@ export class App {
   }
 
   private async anhangSpeichern(index: number): Promise<void> {
-    const { auswahl, offen } = this.zustand;
-    if (!auswahl || !offen) return;
+    const { offen } = this.zustand;
+    if (!offen) return;
     try {
-      const name = await api.anhangSpeichern(auswahl.konto, auswahl.ordner, offen.uid, index);
+      const name = await api.anhangSpeichern(offen.konto, offen.ordner, offen.uid, index);
       this.zustand.hinweis = name ? `Gespeichert: ${name}` : null;
     } catch (fehler) {
       this.zustand.hinweis = fehlertext(fehler);
@@ -326,10 +466,10 @@ export class App {
 
   /** S/MIME: übernimmt das Zertifikat des Absenders der geöffneten (gültig signierten) Mail. */
   private async zertifikatUebernehmen(): Promise<void> {
-    const { auswahl, offen } = this.zustand;
-    if (!auswahl || !offen) return;
+    const { offen } = this.zustand;
+    if (!offen) return;
     try {
-      const info = await api.smimeAusMailUebernehmen(auswahl.konto, auswahl.ordner, offen.uid);
+      const info = await api.smimeAusMailUebernehmen(offen.konto, offen.ordner, offen.uid);
       this.zustand.hinweis = `Zertifikat übernommen: ${info.name} (${info.adressen.join(", ")})`;
       await this.inhaltLaden(false);
       return;
@@ -341,10 +481,10 @@ export class App {
 
   /** Importiert öffentliche Schlüssel aus einem Anhang der geöffneten Mail. */
   private async schluesselAusAnhang(index: number): Promise<void> {
-    const { auswahl, offen } = this.zustand;
-    if (!auswahl || !offen) return;
+    const { offen } = this.zustand;
+    if (!offen) return;
     try {
-      const infos = await api.pgpAusAnhangImportieren(auswahl.konto, auswahl.ordner, offen.uid, index);
+      const infos = await api.pgpAusAnhangImportieren(offen.konto, offen.ordner, offen.uid, index);
       this.zustand.hinweis = `Importiert: ${infos.map((i) => i.benutzer_ids[0] ?? i.fingerabdruck).join(", ")}`;
       // Signaturen lassen sich jetzt eventuell prüfen.
       await this.inhaltLaden(false);
@@ -355,25 +495,31 @@ export class App {
     this.zeichnen();
   }
 
-  private async gelesenSetzen(mail: MailKopf, gelesen: boolean): Promise<void> {
-    const auswahl = this.zustand.auswahl;
-    if (!auswahl) return;
+  private async gelesenSetzen(mail: MailEintrag, gelesen: boolean): Promise<void> {
     try {
-      await api.gelesenSetzen(auswahl.konto, auswahl.ordner, mail.uid, gelesen);
+      await api.gelesenSetzen(mail.konto, mail.ordner, mail.uid, gelesen);
       const geaendert = { ...mail, gelesen };
-      this.zustand.mails = this.zustand.mails.map((m) => (m.uid === mail.uid ? geaendert : m));
-      if (this.zustand.offen?.uid === mail.uid) this.zustand.offen = geaendert;
+      const ersetzen = (liste: MailEintrag[]) => liste.map((m) => (gleicheMail(m, mail) ? { ...m, gelesen } : m));
+      this.zustand.mails = ersetzen(this.zustand.mails);
+      if (this.zustand.suche) this.zustand.suche = { ...this.zustand.suche, treffer: ersetzen(this.zustand.suche.treffer) };
+      if (gleicheMail(this.zustand.offen, mail)) this.zustand.offen = geaendert;
     } catch (fehler) {
       this.zustand.fehler = fehlertext(fehler);
     }
     this.zeichnen();
   }
 
-  private async mailEntfernen(mail: MailKopf, aktion: () => Promise<void>): Promise<void> {
+  private async mailEntfernen(mail: MailEintrag, aktion: () => Promise<void>): Promise<void> {
     try {
       await aktion();
-      this.zustand.mails = this.zustand.mails.filter((m) => m.uid !== mail.uid);
-      if (this.zustand.offen?.uid === mail.uid) {
+      this.zustand.mails = this.zustand.mails.filter((m) => !gleicheMail(m, mail));
+      if (this.zustand.suche) {
+        this.zustand.suche = {
+          ...this.zustand.suche,
+          treffer: this.zustand.suche.treffer.filter((m) => !gleicheMail(m, mail)),
+        };
+      }
+      if (gleicheMail(this.zustand.offen, mail)) {
         this.zustand.offen = null;
         this.zustand.inhalt = null;
       }
@@ -388,11 +534,9 @@ export class App {
    * Löscht eine Mail. Gibt es keinen Papierkorb oder liegt die Mail schon darin,
    * löscht der Server sie endgültig – dann wird vorher nachgefragt.
    */
-  private async mailLoeschen(mail: MailKopf): Promise<void> {
-    const auswahl = this.zustand.auswahl;
-    if (!auswahl) return;
-    const papierkorb = (this.zustand.ordner.get(auswahl.konto) ?? []).find((o) => o.sonder === "papierkorb");
-    if (!papierkorb || papierkorb.name === auswahl.ordner) {
+  private async mailLoeschen(mail: MailEintrag): Promise<void> {
+    const papierkorb = (this.zustand.ordner.get(mail.konto) ?? []).find((o) => o.sonder === "papierkorb");
+    if (!papierkorb || papierkorb.name === mail.ordner) {
       const ok = await bestaetigen({
         titel: "Endgültig löschen?",
         text: `„${mail.betreff || "(kein Betreff)"}“ wird auf dem Server endgültig gelöscht und lässt sich nicht wiederherstellen.`,
@@ -401,7 +545,7 @@ export class App {
       });
       if (!ok) return;
     }
-    await this.mailEntfernen(mail, () => api.mailLoeschen(auswahl.konto, auswahl.ordner, mail.uid));
+    await this.mailEntfernen(mail, () => api.mailLoeschen(mail.konto, mail.ordner, mail.uid));
   }
 
   /** Konto der aktuellen Auswahl (oder das erste). */
@@ -430,13 +574,13 @@ export class App {
   }
 
   private async weiterleiten(mail: AufbereiteteMail): Promise<void> {
-    const { auswahl, offen } = this.zustand;
+    const { offen } = this.zustand;
     const konto = this.aktuellesKonto();
-    if (!konto || !auswahl || !offen) return;
+    if (!konto || !offen) return;
     const entwurf = weiterleitenEntwurf(mail, konto);
     if (mail.anhaenge.length > 0) {
       try {
-        entwurf.anhaenge = await api.mailAnhaengeUebernehmen(auswahl.konto, auswahl.ordner, offen.uid);
+        entwurf.anhaenge = await api.mailAnhaengeUebernehmen(offen.konto, offen.ordner, offen.uid);
       } catch (fehler) {
         this.meldungZeigen(`Anhänge konnten nicht übernommen werden: ${fehlertext(fehler)}`);
       }
@@ -516,8 +660,38 @@ export class App {
     );
   }
 
+  /** Eine Zeile der Mailliste; bei einer Suche mit hervorgehobenen Begriffen und ggf. dem Ordner. */
+  private mailZeile(mail: MailEintrag, suche: SuchZustand | null): HTMLLIElement {
+    const { offen } = this.zustand;
+    const klassen = ["mail"];
+    if (!mail.gelesen) klassen.push("ungelesen");
+    const istOffen = gleicheMail(offen, mail);
+    if (istOffen) klassen.push("offen");
+    const text = (wert: string, betroffen: boolean): Node[] =>
+      suche && betroffen ? hervorheben(wert, suche.begriff) : [document.createTextNode(wert)];
+    const absender = mail.absender || mail.absender_adresse || "(unbekannt)";
+    const ordner = suche?.bereich === "konto"
+      ? (this.zustand.ordner.get(mail.konto) ?? []).find((o) => o.name === mail.ordner)?.anzeigename ?? mail.ordner
+      : null;
+    const zeile = el(
+      "button",
+      { type: "button", class: klassen.join(" "), "aria-current": istOffen ? "true" : undefined },
+      el("span", { class: "mail-absender" }, ...text(absender, suche?.feld !== "betreff" && suche?.feld !== "inhalt")),
+      el("span", { class: "mail-datum" }, datumKurz(mail.datum)),
+      el(
+        "span",
+        { class: "mail-betreff" },
+        ...text(mail.betreff || "(kein Betreff)", suche?.feld !== "absender" && suche?.feld !== "inhalt"),
+      ),
+      ordner ? el("span", { class: "mail-ordner" }, `Ordner: ${ordner}`) : null,
+    );
+    zeile.addEventListener("click", () => void this.mailOeffnen(mail));
+    return el("li", {}, zeile);
+  }
+
   private listeZeichnen(): void {
-    const { auswahl, mails, weitere, offline, laedt, offen, fehler, konten } = this.zustand;
+    const { auswahl, mails, weitere, offline, laedt, fehler, konten, suche } = this.zustand;
+    this.suchleiste.element.hidden = konten.length === 0 || !auswahl;
     const teile: Node[] = [];
     if (fehler) teile.push(el("p", { class: "fehler", role: "alert" }, fehler));
     if (konten.length === 0) {
@@ -533,32 +707,23 @@ export class App {
           ),
         ),
       );
-      this.listenBereich.replaceChildren(...teile);
+      this.listenInhalt.replaceChildren(...teile);
       return;
     }
     if (!auswahl) {
       teile.push(el("p", { class: "leise" }, "Wähle einen Ordner aus."));
-      this.listenBereich.replaceChildren(...teile);
+      this.listenInhalt.replaceChildren(...teile);
+      return;
+    }
+    if (suche) {
+      this.trefferZeichnen(suche, teile);
       return;
     }
     if (offline) {
       teile.push(el("p", { class: "hinweis-leiste" }, `Keine Verbindung zum Server – gespeicherte Mails werden angezeigt. ${offline}`));
     }
     const liste = el("ul", { class: "mails" });
-    for (const mail of mails) {
-      const klassen = ["mail"];
-      if (!mail.gelesen) klassen.push("ungelesen");
-      if (offen?.uid === mail.uid) klassen.push("offen");
-      const zeile = el(
-        "button",
-        { type: "button", class: klassen.join(" "), "aria-current": offen?.uid === mail.uid ? "true" : undefined },
-        el("span", { class: "mail-absender" }, mail.absender || mail.absender_adresse || "(unbekannt)"),
-        el("span", { class: "mail-datum" }, datumKurz(mail.datum)),
-        el("span", { class: "mail-betreff" }, mail.betreff || "(kein Betreff)"),
-      );
-      zeile.addEventListener("click", () => void this.mailOeffnen(mail));
-      liste.append(el("li", {}, zeile));
-    }
+    for (const mail of mails) liste.append(this.mailZeile(mail, null));
     teile.push(liste);
     if (laedt) {
       teile.push(el("p", { class: "leise" }, "Mails werden geladen …"));
@@ -569,30 +734,70 @@ export class App {
       mehr.addEventListener("click", () => void this.mailsLaden(true));
       teile.push(mehr);
     }
-    this.listenBereich.replaceChildren(...teile);
+    this.listenInhalt.replaceChildren(...teile);
+  }
+
+  /** Trefferliste einer Suche (#49). */
+  private trefferZeichnen(suche: SuchZustand, teile: Node[]): void {
+    const anzahl = suche.treffer.length;
+    let info: string;
+    if (suche.laedt && anzahl === 0) {
+      info = suche.server ? "Suche auf dem Server …" : "Suche läuft …";
+    } else if (suche.fehler) {
+      info = "";
+    } else if (anzahl === 0) {
+      info = suche.server ? "Auch auf dem Server keine Treffer." : "Keine Treffer auf diesem Gerät.";
+    } else {
+      const mehr = suche.weitere && !suche.server ? "+" : "";
+      info = `${anzahl}${mehr} ${suche.server ? "Treffer auf dem Server" : "Treffer"}`;
+    }
+    teile.push(el("p", { class: "such-info", role: "status" }, info));
+    if (suche.fehler) teile.push(el("p", { class: "fehler", role: "alert" }, suche.fehler));
+    const liste = el("ul", { class: "mails" });
+    for (const mail of suche.treffer) liste.append(this.mailZeile(mail, suche));
+    teile.push(liste);
+    if (suche.laedt && anzahl > 0) {
+      teile.push(el("p", { class: "leise" }, "Weitere Treffer werden geladen …"));
+    } else if (!suche.laedt && suche.weitere && !suche.server) {
+      const mehr = el("button", { type: "button", class: "breit" }, "Mehr laden");
+      mehr.addEventListener("click", () => void this.lokalSuchen("mehr"));
+      teile.push(mehr);
+    } else if (!suche.laedt && suche.weitere && suche.server) {
+      teile.push(el("p", { class: "leise" }, "Es werden die neuesten 200 Treffer angezeigt. Grenze die Suche weiter ein."));
+    }
+    if (!suche.server && !suche.laedt) {
+      teile.push(
+        el(
+          "p",
+          { class: "leise" },
+          "Gesucht wurde nur in den Mails, die auf diesem Gerät gespeichert sind. Ältere Mails findest du mit „Auf dem Server suchen“.",
+        ),
+      );
+    }
+    this.listenInhalt.replaceChildren(...teile);
   }
 
   private leseansichtZeichnen(): void {
-    const { offen, auswahl, inhalt, nurText, hinweis } = this.zustand;
-    const ordner = auswahl ? this.zustand.ordner.get(auswahl.konto) : undefined;
+    const { offen, inhalt, nurText, hinweis } = this.zustand;
+    const ordner = offen ? this.zustand.ordner.get(offen.konto) : undefined;
     // Nur neu zeichnen, wenn sich etwas Sichtbares geändert hat (sonst würde das iframe neu geladen).
-    const stand = [offen?.uid, offen?.gelesen, auswahl, inhalt, nurText, hinweis, ordner];
+    const stand = [offen?.konto, offen?.ordner, offen?.uid, offen?.gelesen, inhalt, nurText, hinweis, ordner];
     if (stand.length === this.gezeichnet.length && stand.every((wert, i) => wert === this.gezeichnet[i])) {
       return;
     }
     this.gezeichnet = stand;
-    if (!offen || !auswahl) {
+    if (!offen) {
       this.leseBereich.replaceChildren(el("p", { class: "leise" }, "Keine Mail ausgewählt."));
       return;
     }
     this.leseBereich.replaceChildren(
-      leseansicht(offen, auswahl.ordner, ordner ?? [], inhalt ?? { art: "laedt" }, { nurText, hinweis }, {
+      leseansicht(offen, offen.ordner, ordner ?? [], inhalt ?? { art: "laedt" }, { nurText, hinweis }, {
         antworten: (mail, allen) => this.antworten(mail, allen),
         weiterleiten: (mail) => void this.weiterleiten(mail),
-        gelesenUmschalten: (mail) => void this.gelesenSetzen(mail, !mail.gelesen),
-        loeschen: (mail) => void this.mailLoeschen(mail),
-        verschieben: (mail, ziel) =>
-          void this.mailEntfernen(mail, () => api.mailVerschieben(auswahl.konto, auswahl.ordner, mail.uid, ziel)),
+        gelesenUmschalten: () => void this.gelesenSetzen(offen, !offen.gelesen),
+        loeschen: () => void this.mailLoeschen(offen),
+        verschieben: (_mail, ziel) =>
+          void this.mailEntfernen(offen, () => api.mailVerschieben(offen.konto, offen.ordner, offen.uid, ziel)),
         nurTextUmschalten: (wert) => {
           this.zustand.nurText = wert;
           this.zeichnen();

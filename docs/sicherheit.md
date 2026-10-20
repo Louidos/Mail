@@ -51,6 +51,24 @@ Sicherheitslücken bitte wie in [SECURITY.md](../SECURITY.md) beschrieben melden
 - `secure_delete` ist eingeschaltet, Dateien im Datenordner sind unter Unix nur für den eigenen Benutzer lesbar.
 - „Mails lokal speichern“ lässt sich ausschalten; „Lokalen Speicher leeren“ löscht alle zwischengespeicherten Mails.
 
+### Suche (#49)
+
+- Der **Suchindex** (SQLite FTS5) liegt als Tabelle in derselben verschlüsselten Datei `mails.db` – keine zweite,
+  unverschlüsselte Datei, keine fremde Suchbibliothek mit eigenem Speicher. Ohne den Schlüssel aus dem
+  Schlüsselbund ist weder ein Suchbegriff noch ein Mailinhalt lesbar (Tests prüfen, dass keine Begriffe und
+  keine Indexstrukturen im Klartext in den Dateien stehen).
+- Indiziert werden Absender, Betreff und Text. Bei **Ende-zu-Ende verschlüsselten Mails** (OpenPGP, S/MIME, auch
+  wenn nur ein Teil verschlüsselt ist) nur Absender und Betreff – entschlüsselter Klartext kommt nie in den Index.
+- Die lokale Suche baut keine Verbindung auf und nutzt keine Fremddienste. Eingaben werden nie als FTS5-Syntax
+  oder SQL verwendet: Jedes Wort wird als Zeichenkette in Anführungszeichen gesetzt, alle Werte gehen als
+  Parameter an die Datenbank.
+- **Auf dem Server suchen** schickt den Suchbegriff – nur nach diesem Klick – an den eigenen IMAP-Server
+  (`UID SEARCH`), über die bestehende verschlüsselte Verbindung des Kontos. Wörter mit Sonderzeichen oder Umlauten
+  gehen als IMAP-Literal mit genau angekündigter Länge, Steuerzeichen (CR, LF) werden vorher entfernt; so lässt sich
+  kein weiterer Befehl einschleusen. Gefundene, noch nicht gespeicherte Mails werden nur angezeigt.
+- Beim Entfernen eines Kontos werden seine Einträge sofort aus allen Teilen des Index entfernt; „Lokalen Speicher
+  leeren“ legt den Index neu an.
+
 ### Anzeige von Mails
 
 - HTML wird im Backend mit `ammonia` bereinigt (Positivliste): keine Skripte, Formulare, iframes, Objekte, SVG,
@@ -247,6 +265,8 @@ verschwinden mit Updates von Tauri bzw. seinen Abhängigkeiten (Dependabot).
 - **Schutz nur so gut wie das Gerät**: Wer den entsperrten Rechner bzw. den entsperrten Schlüsselbund kontrolliert,
   kann Passwörter und lokale Mails lesen. Der Arbeitsspeicher des laufenden Programms ist nicht gesondert geschützt.
 - **Metadaten**: Server und Netzbetreiber sehen, wann und mit welchem Server verbunden wird.
+- **Server-Suche**: Wer „Auf dem Server suchen“ nutzt, gibt dem eigenen Mailserver den Suchbegriff preis. Die
+  lokale Suche bleibt auf dem Gerät.
 - **Anhänge** werden nicht auf Schadsoftware geprüft.
 - **Nur IMAP/SMTP**: kein POP3, kein Exchange/EWS.
 - **Externe Bilder über einen Proxy**: Standardmässig nie. Mit der Einstellung „Proxy für externe Bilder verwenden“
