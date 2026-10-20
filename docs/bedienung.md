@@ -83,6 +83,33 @@ Eine Mail anklicken öffnet sie rechts und markiert sie als gelesen. Darüber:
 Alle Änderungen werden sofort zum Server übertragen und gelten damit auch für andere Programme.
 SicherMail löscht nie von sich aus Mails auf dem Server.
 
+## Mails suchen
+
+Über der Mailliste steht das **Suchfeld**. **Ctrl+F** (macOS: **Cmd+F**) springt direkt hinein.
+
+- Einfach losschreiben: Kurz nach der letzten Eingabe (0,3 Sekunden) erscheinen die Treffer in der Mailliste,
+  neueste zuerst; die Suchwörter sind hervorgehoben. **Enter** sucht sofort.
+- Gesucht wird nach **Wortanfängen** („Rech“ findet „Rechnung“), ohne Rücksicht auf Gross- und Kleinschreibung
+  und Akzente („zurich“ findet „Zürich“). Bei mehreren Wörtern müssen alle vorkommen. Anführungszeichen,
+  Sternchen und andere Zeichen sind gewöhnlicher Text, keine Suchbefehle.
+- **Suchen in**: **Alle Felder**, nur **Absender** (Name und Adresse), nur **Betreff** oder nur **Inhalt**.
+- **Suchbereich**: **Dieser Ordner** (Standard) oder **Alle Ordner des Kontos** – dann steht bei jedem Treffer
+  sein Ordner.
+- Es werden 200 Treffer auf einmal gezeigt, **Mehr laden** holt die nächsten.
+- Treffer lassen sich wie gewohnt öffnen, markieren, verschieben und löschen.
+- **Suche beenden** (oder **Esc** im Suchfeld) zeigt wieder die Mails des Ordners. Ein anderer Ordner beendet die
+  Suche ebenfalls.
+
+**Lokal und auf dem Server:** Zuerst sucht SicherMail nur in den Mails, die verschlüsselt auf diesem Gerät liegen
+(siehe [Lesen ohne Internet](#lesen-ohne-internet-lokaler-speicher)) – ohne Verbindung zum Server. Der Inhalt
+ist dabei nur für Mails durchsuchbar, deren Text schon geladen wurde (geöffnete Mails und die neuesten 50 im
+Posteingang). Ältere Mails findest du mit **Auf dem Server suchen**: Erst dieser Klick schickt den Suchbegriff an
+deinen eigenen Mailserver, über die bestehende verschlüsselte Verbindung. Gezeigt werden die neuesten
+200 Treffer; dabei findet der Server Wortteile („nung“ findet auch „Rechnung“), Akzente zählen aber.
+
+**Verschlüsselte Mails** (OpenPGP, S/MIME) findest du über Absender und Betreff. Ihr Inhalt ist nicht
+durchsuchbar: Der entschlüsselte Text wird nie gespeichert, und auch der Server kennt nur den verschlüsselten Text.
+
 ## Mails sicher lesen
 
 SicherMail zeigt Mails so an, dass Skripte, Tracking und gefälschte Links keinen Schaden anrichten:
@@ -325,8 +352,8 @@ Die Leiste über dem Inhalt sieht aus wie bei OpenPGP und nennt das Verfahren:
   (Linux: `~/.local/share/ch.sichermail.app/`, macOS: `~/Library/Application Support/ch.sichermail.app/`,
   Windows: `%APPDATA%\ch.sichermail.app\`).
 - Passwörter: ausschliesslich im Schlüsselbund des Betriebssystems (Eintrag „SicherMail“).
-- Zwischengespeicherte Mails: `mails.db` im App-Datenordner, verschlüsselt mit SQLCipher; der Schlüssel liegt im
-  Schlüsselbund (Eintrag `speicher:schluessel`).
+- Zwischengespeicherte Mails und der Suchindex: `mails.db` im App-Datenordner, verschlüsselt mit SQLCipher; der
+  Schlüssel liegt im Schlüsselbund (Eintrag `speicher:schluessel`).
 - Einstellungen (inkl. freigegebener Absender und Proxy-Adresse): `einstellungen.json` im App-Datenordner.
 - OpenPGP-Schlüssel: `schluessel.db` im App-Datenordner, verschlüsselt mit SQLCipher; der Schlüssel liegt im
   Schlüsselbund (Eintrag `pgp:schluessel`). Private Schlüssel sind zusätzlich mit deiner Passphrase geschützt.

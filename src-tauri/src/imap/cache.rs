@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 
 use crate::fehler::Fehlermeldung;
+use crate::speicher::suche::{self, MailEintrag, Suche};
 
 /// Kopfdaten einer Mail für die Mailliste.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -91,6 +92,14 @@ pub trait MailCache: Send + Sync {
     /// Alle Entwürfe eines Kontos als (ID, JSON), zuletzt geänderte zuerst.
     fn entwuerfe(&self, konto: &str) -> Result<Vec<(String, String)>, Fehlermeldung>;
     fn entwurf_loeschen(&self, id: &str) -> Result<(), Fehlermeldung>;
+
+    /// Lokale Suche (#49): Treffer im Suchbereich, neueste zuerst, ab `start`.
+    fn suchen(
+        &self,
+        suche: &Suche,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<Vec<MailEintrag>, Fehlermeldung>;
 }
 
 #[derive(Default)]
@@ -292,11 +301,46 @@ impl MailCache for SpeicherCache {
             .remove(id);
         Ok(())
     }
+
+    fn suchen(
+        &self,
+        suche: &Suche,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<Vec<MailEintrag>, Fehlermeldung> {
+        let daten = self
+            .daten
+            .lock()
+            .map_err(|_| Fehlermeldung::neu("intern", "Interner Fehler im Zwischenspeicher."))?;
+        let mut treffer: Vec<MailEintrag> = daten
+            .iter()
+            .filter(|((konto, ordner), _)| suche.umfasst(konto, ordner))
+            .flat_map(|((konto, ordner), d)| {
+                d.koepfe
+                    .values()
+                    .filter(|kopf| {
+                        suche::passt(&suche.begriff, suche.feld, kopf, || {
+                            d.inhalte
+                                .get(&kopf.uid)
+                                .and_then(|roh| suche::suchtext(roh))
+                        })
+                    })
+                    .map(|kopf| MailEintrag {
+                        konto: konto.clone(),
+                        ordner: ordner.clone(),
+                        kopf: kopf.clone(),
+                    })
+            })
+            .collect();
+        treffer.sort_by(suche::nach_datum);
+        Ok(treffer.into_iter().skip(start).take(anzahl).collect())
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::speicher::suche::{SuchFeld, SuchOrt};
 
     pub(crate) fn kopf(uid: u32) -> MailKopf {
         MailKopf {
@@ -385,8 +429,188 @@ pub(crate) mod tests {
         assert_eq!(cache.entwuerfe("anders").unwrap().len(), 1);
     }
 
+    fn mit_betreff(uid: u32, betreff: &str, absender: &str, adresse: &str) -> MailKopf {
+        MailKopf {
+            betreff: betreff.into(),
+            absender: absender.into(),
+            absender_adresse: adresse.into(),
+            ..kopf(uid)
+        }
+    }
+
+    fn uids_von(treffer: &[MailEintrag]) -> Vec<(String, String, u32)> {
+        treffer
+            .iter()
+            .map(|t| (t.konto.clone(), t.ordner.clone(), t.kopf.uid))
+            .collect()
+    }
+
+    fn suche(begriff: &str, feld: SuchFeld, orte: &[(&str, Option<&str>)]) -> Suche {
+        Suche {
+            begriff: begriff.into(),
+            feld,
+            orte: orte
+                .iter()
+                .map(|(konto, ordner)| SuchOrt {
+                    konto: konto.to_string(),
+                    ordner: ordner.map(str::to_string),
+                })
+                .collect(),
+        }
+    }
+
+    /// Prüft die lokale Suche (#49), die jede Ablage erfüllen muss.
+    pub(crate) fn suche_pruefen(cache: &dyn MailCache) {
+        let ort = |o: &str, u: u32| ("k".to_string(), o.to_string(), u);
+        cache
+            .koepfe_speichern(
+                "k",
+                "INBOX",
+                &[
+                    mit_betreff(1, "Rechnung März", "Jürg Müller", "juerg@example.org"),
+                    mit_betreff(2, "Ferien", "Anna", "anna@example.org"),
+                ],
+            )
+            .unwrap();
+        cache
+            .koepfe_speichern(
+                "k",
+                "Archiv",
+                &[mit_betreff(3, "Rechnung alt", "Bea", "bea@example.org")],
+            )
+            .unwrap();
+        cache
+            .koepfe_speichern(
+                "anders",
+                "INBOX",
+                &[mit_betreff(4, "Rechnung", "Bea", "bea@example.org")],
+            )
+            .unwrap();
+        cache
+            .inhalt_speichern(
+                "k",
+                "INBOX",
+                2,
+                b"From: anna@example.org\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nDas Velo ist kaputt.\r\n",
+            )
+            .unwrap();
+
+        let dieser_ordner = [("k", Some("INBOX"))];
+        let ganzes_konto = [("k", None)];
+        let finden = |begriff: &str, feld: SuchFeld, orte: &[(&str, Option<&str>)]| {
+            uids_von(&cache.suchen(&suche(begriff, feld, orte), 0, 200).unwrap())
+        };
+
+        // Absender, Betreff, Inhalt; Wortanfänge genügen.
+        assert_eq!(
+            finden("rechnung", SuchFeld::Alle, &dieser_ordner),
+            vec![ort("INBOX", 1)]
+        );
+        assert_eq!(
+            finden("Rech", SuchFeld::Betreff, &dieser_ordner),
+            vec![ort("INBOX", 1)]
+        );
+        assert_eq!(
+            finden("müller", SuchFeld::Absender, &dieser_ordner),
+            vec![ort("INBOX", 1)]
+        );
+        assert_eq!(
+            finden("juerg@example.org", SuchFeld::Absender, &dieser_ordner),
+            vec![ort("INBOX", 1)]
+        );
+        assert_eq!(
+            finden("velo", SuchFeld::Inhalt, &dieser_ordner),
+            vec![ort("INBOX", 2)]
+        );
+        assert_eq!(
+            finden("velo", SuchFeld::Alle, &dieser_ordner),
+            vec![ort("INBOX", 2)]
+        );
+        assert!(finden("velo", SuchFeld::Betreff, &dieser_ordner).is_empty());
+        assert!(finden("Ferien", SuchFeld::Absender, &dieser_ordner).is_empty());
+        // Alle Wörter müssen passen.
+        assert_eq!(
+            finden("rechnung märz", SuchFeld::Alle, &dieser_ordner),
+            vec![ort("INBOX", 1)]
+        );
+        assert!(finden("rechnung ferien", SuchFeld::Alle, &dieser_ordner).is_empty());
+
+        // Alle Ordner des Kontos, neueste zuerst; andere Konten nie.
+        assert_eq!(
+            finden("rechnung", SuchFeld::Alle, &ganzes_konto),
+            vec![ort("Archiv", 3), ort("INBOX", 1)]
+        );
+        let seite = cache
+            .suchen(&suche("rechnung", SuchFeld::Alle, &ganzes_konto), 1, 1)
+            .unwrap();
+        assert_eq!(uids_von(&seite), vec![ort("INBOX", 1)]);
+
+        // Sonderzeichen sind nur Text: keine Fehler, keine falschen Treffer.
+        for begriff in [
+            "\"",
+            "*",
+            "\\",
+            "\"*\\",
+            "Rech\"nung",
+            "NOT -x",
+            "betreff:x",
+            "NEAR(a b)",
+            "😀",
+            "",
+        ] {
+            let treffer = cache
+                .suchen(&suche(begriff, SuchFeld::Alle, &ganzes_konto), 0, 200)
+                .unwrap();
+            assert!(treffer.is_empty(), "{begriff}: {treffer:?}");
+        }
+
+        // Entfernte Mails werden nicht mehr gefunden, geänderte mit neuem Text.
+        cache.entfernen("k", "INBOX", &[1]).unwrap();
+        assert!(finden("rechnung", SuchFeld::Alle, &dieser_ordner).is_empty());
+        cache
+            .koepfe_speichern(
+                "k",
+                "INBOX",
+                &[mit_betreff(2, "Velo-Reparatur", "Anna", "anna@example.org")],
+            )
+            .unwrap();
+        assert_eq!(
+            finden("reparatur", SuchFeld::Betreff, &dieser_ordner),
+            vec![ort("INBOX", 2)]
+        );
+        assert!(finden("ferien", SuchFeld::Alle, &dieser_ordner).is_empty());
+        // Der Inhalt bleibt beim Aktualisieren der Kopfdaten im Index.
+        assert_eq!(
+            finden("kaputt", SuchFeld::Inhalt, &dieser_ordner),
+            vec![ort("INBOX", 2)]
+        );
+
+        // Neue UIDVALIDITY leert den Ordner – auch im Index.
+        cache
+            .stand_setzen("k", "INBOX", OrdnerStand { uidvalidity: 1 })
+            .unwrap();
+        cache
+            .stand_setzen("k", "INBOX", OrdnerStand { uidvalidity: 2 })
+            .unwrap();
+        assert!(finden("velo", SuchFeld::Alle, &dieser_ordner).is_empty());
+
+        cache.konto_entfernen("k").unwrap();
+        assert!(finden("rechnung", SuchFeld::Alle, &ganzes_konto).is_empty());
+        assert_eq!(
+            finden("rechnung", SuchFeld::Alle, &[("anders", None)]).len(),
+            1
+        );
+        cache.leeren().unwrap();
+        assert!(finden("rechnung", SuchFeld::Alle, &[("anders", None)]).is_empty());
+    }
+
     #[test]
     fn speicher_cache_verhalten() {
         verhalten_pruefen(&SpeicherCache::default());
+    }
+
+    #[test]
+    fn speicher_cache_suche() {
+        suche_pruefen(&SpeicherCache::default());
     }
 }

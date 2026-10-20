@@ -7,6 +7,10 @@ die Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/).
 
 ## Unveröffentlicht
 
+### Hinzugefügt
+
+- Mails lassen sich nach Absender, Betreff und Inhalt durchsuchen, lokal und auf Wunsch auf dem Server; der Suchindex ist verschlüsselt. Das Suchfeld steht über der Mailliste (Ctrl/Cmd+F), Treffer sind hervorgehoben, auch Mails von vor dem Update werden gefunden (#49)
+
 ## 0.4.0 – 2026-10-19
 
 ### Hinzugefügt

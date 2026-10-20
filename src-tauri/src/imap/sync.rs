@@ -130,7 +130,7 @@ pub fn kopf_aus_fetch(fetch: &Fetch) -> Option<MailKopf> {
     })
 }
 
-async fn koepfe_holen(
+pub(crate) async fn koepfe_holen(
     sitzung: &mut ImapSitzung,
     menge: &str,
     per_uid: bool,

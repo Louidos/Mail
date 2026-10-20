@@ -126,3 +126,7 @@ path = "../tests/integration/pgp.rs"
 [[test]]
 name = "smime"
 path = "../tests/integration/smime.rs"
+
+[[test]]
+name = "suche"
+path = "../tests/integration/suche.rs"

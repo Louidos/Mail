@@ -19,10 +19,14 @@ use tokio::time::timeout;
 
 use super::cache::{MailCache, MailKopf};
 use super::ordner::{ordner_laden, Ordner, Sonderordner};
-use super::sync::{aeltere_laden, ordner_abgleichen, SyncErgebnis, SyncFehler, ERSTE_SEITE};
+use super::suche::{suchbefehl, uid_suchen, MAX_SERVER_TREFFER};
+use super::sync::{
+    aeltere_laden, koepfe_holen, ordner_abgleichen, SyncErgebnis, SyncFehler, ERSTE_SEITE,
+};
 use super::{anmelden, fehler_einordnen, ImapSitzung};
 use crate::fehler::{Fehlermeldung, VerbindungsFehler};
 use crate::konto::KontoVerwaltung;
+use crate::speicher::suche::{self, MailEintrag, SuchFeld, SuchSeite, Suche};
 
 /// Höchstdauer eines einzelnen Befehls.
 const BEFEHL_ZEITLIMIT: Duration = Duration::from_secs(120);
@@ -275,6 +279,22 @@ impl ImapDienst {
         })
     }
 
+    /// Lokale Suche (#49) im Zwischenspeicher – ohne Netz. Gibt höchstens `anzahl` Treffer ab
+    /// `start` zurück und ob es weitere gibt.
+    pub fn suchen(
+        &self,
+        suche: &Suche,
+        start: usize,
+        anzahl: usize,
+    ) -> Result<SuchSeite, Fehlermeldung> {
+        let mut mails = self
+            .cache()
+            .suchen(suche, start, anzahl.saturating_add(1))?;
+        let weitere = mails.len() > anzahl;
+        mails.truncate(anzahl);
+        Ok(SuchSeite { mails, weitere })
+    }
+
     /// Eine Seite der Mailliste (neueste zuerst).
     ///
     /// Für die erste Seite wird vorher mit dem Server abgeglichen. Ist der Server nicht
@@ -335,6 +355,82 @@ impl ImapDienst {
             offline,
             weitere,
         })
+    }
+
+    /// Suche auf dem Server (#49) mit `UID SEARCH` im Ordner `ordner` bzw. in allen Ordnern des
+    /// Kontos. Nur über die bestehende Verbindung des Kontos. Gezeigt werden die neuesten
+    /// [`MAX_SERVER_TREFFER`] Treffer; Kopfdaten noch nicht gespeicherter Mails werden vom Server
+    /// geladen, aber nicht in den Zwischenspeicher übernommen (sonst würden beim späteren
+    /// „Ältere Mails laden“ die Mails dazwischen übersprungen).
+    pub async fn server_suchen(
+        &self,
+        konto_id: &str,
+        ordner: Option<&str>,
+        begriff: &str,
+        feld: SuchFeld,
+    ) -> Result<SuchSeite, Fehlermeldung> {
+        let Some(befehl) = suchbefehl(begriff, feld) else {
+            return Ok(SuchSeite::default());
+        };
+        let befehl = Arc::new(befehl);
+        let ordner_liste: Vec<String> = match ordner {
+            Some(o) => vec![o.to_string()],
+            None => self
+                .ordner(konto_id)
+                .await?
+                .into_iter()
+                .filter(|o| o.waehlbar)
+                .map(|o| o.name)
+                .collect(),
+        };
+        let mut seite = SuchSeite::default();
+        for name in ordner_liste {
+            let cache = self.cache();
+            let konto = konto_id.to_string();
+            let befehl = befehl.clone();
+            let ordner_name = name.clone();
+            let (koepfe, mehr) = self
+                .ausfuehren(konto_id, move |s| {
+                    let (cache, konto, befehl, ordner) = (
+                        cache.clone(),
+                        konto.clone(),
+                        befehl.clone(),
+                        ordner_name.clone(),
+                    );
+                    Box::pin(async move {
+                        s.select(&ordner).await.map_err(fehler_einordnen)?;
+                        let uids = uid_suchen(s, &befehl).await?;
+                        let mehr = uids.len() > MAX_SERVER_TREFFER;
+                        let mut koepfe = Vec::new();
+                        let mut fehlend = Vec::new();
+                        for uid in uids.into_iter().rev().take(MAX_SERVER_TREFFER) {
+                            match cache.kopf(&konto, &ordner, uid)? {
+                                Some(kopf) => koepfe.push(kopf),
+                                None => fehlend.push(uid.to_string()),
+                            }
+                        }
+                        if !fehlend.is_empty() {
+                            koepfe.extend(koepfe_holen(s, &fehlend.join(","), true).await?);
+                        }
+                        Ok((koepfe, mehr))
+                    })
+                })
+                .await?;
+            seite.weitere |= mehr;
+            seite
+                .mails
+                .extend(koepfe.into_iter().map(|kopf| MailEintrag {
+                    konto: konto_id.to_string(),
+                    ordner: name.clone(),
+                    kopf,
+                }));
+        }
+        seite.mails.sort_by(suche::nach_datum);
+        if seite.mails.len() > MAX_SERVER_TREFFER {
+            seite.mails.truncate(MAX_SERVER_TREFFER);
+            seite.weitere = true;
+        }
+        Ok(seite)
     }
 
     /// Vollständige Mail (RFC 822). Aus dem Zwischenspeicher oder vom Server.

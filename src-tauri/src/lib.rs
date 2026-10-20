@@ -150,6 +150,8 @@ pub fn run() {
             befehle::ordner_auflisten,
             befehle::mails_auflisten,
             befehle::mails_lokal,
+            befehle::mails_suchen,
+            befehle::mails_server_suchen,
             befehle::mail_gelesen_setzen,
             befehle::mail_loeschen,
             befehle::mail_verschieben,

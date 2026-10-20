@@ -520,6 +520,66 @@ button.mail.offen .mail-datum {
   font-size: var(--groesse-klein);
 }
 
+/* Suche (#49): Leiste über der Mailliste, bleibt beim Blättern sichtbar */
+
+.suchleiste {
+  position: sticky;
+  top: calc(-1 * var(--abstand-2));
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--abstand-2);
+  margin: calc(-1 * var(--abstand-2)) calc(-1 * var(--abstand-2)) var(--abstand-2);
+  padding: var(--abstand-2);
+  background: var(--grund);
+  border-bottom: 1px solid var(--linie);
+}
+
+.suchleiste[hidden] {
+  display: none;
+}
+
+.such-optionen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--abstand-2);
+}
+
+.such-optionen select {
+  width: auto;
+  padding: var(--abstand-1) var(--abstand-2);
+  font-size: var(--groesse-klein);
+}
+
+.such-info {
+  margin: 0 0 var(--abstand-1);
+  color: var(--text-leise);
+  font-size: var(--groesse-klein);
+}
+
+.such-info:empty {
+  display: none;
+}
+
+/* Hervorgehobene Suchbegriffe: Hintergrund und fette Schrift, nicht nur Farbe */
+button.mail mark {
+  background: var(--blau-rand);
+  color: var(--text);
+  font-weight: 700;
+  border-radius: var(--radius-klein);
+}
+
+.mail-ordner {
+  grid-column: 1 / -1;
+  color: var(--text-leise);
+  font-size: var(--groesse-klein);
+}
+
+button.mail:hover .mail-ordner,
+button.mail.offen .mail-ordner {
+  color: var(--text);
+}
+
 /* Leseansicht */
 
 .lesen .werkzeuge {

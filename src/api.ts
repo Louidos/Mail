@@ -78,6 +78,21 @@ export interface MailKopf {
   groesse: number;
 }
 
+/** Eine Mail mit ihrem Konto und Ordner (z. B. in Suchtreffern, #49). */
+export interface MailEintrag extends MailKopf {
+  konto: string;
+  ordner: string;
+}
+
+/** Wo gesucht wird (#49). */
+export type SuchFeld = "alle" | "absender" | "betreff" | "inhalt";
+
+export interface SuchSeite {
+  mails: MailEintrag[];
+  /** Lokal: weitere Treffer vorhanden. Server: mehr Treffer als angezeigt. */
+  weitere: boolean;
+}
+
 export interface MailSeite {
   mails: MailKopf[];
   auf_server: number | null;
@@ -300,6 +315,12 @@ export const api = {
     invoke<MailSeite>("mails_auflisten", { konto, ordner, start, anzahl }),
   mailsLokal: (konto: string, ordner: string, start: number, anzahl: number) =>
     invoke<MailSeite>("mails_lokal", { konto, ordner, start, anzahl }),
+  /** Lokale Suche im verschlüsselten Speicher; `ordner = null` heisst: alle Ordner des Kontos. */
+  mailsSuchen: (konto: string, ordner: string | null, begriff: string, feld: SuchFeld, start: number, anzahl: number) =>
+    invoke<SuchSeite>("mails_suchen", { konto, ordner, begriff, feld, start, anzahl }),
+  /** Suche auf dem eigenen Server (nur auf ausdrücklichen Klick). */
+  mailsServerSuchen: (konto: string, ordner: string | null, begriff: string, feld: SuchFeld) =>
+    invoke<SuchSeite>("mails_server_suchen", { konto, ordner, begriff, feld }),
   gelesenSetzen: (konto: string, ordner: string, uid: number, gelesen: boolean) =>
     invoke<void>("mail_gelesen_setzen", { konto, ordner, uid, gelesen }),
   mailLoeschen: (konto: string, ordner: string, uid: number) => invoke<void>("mail_loeschen", { konto, ordner, uid }),
